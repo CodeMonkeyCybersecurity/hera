@@ -3,6 +3,7 @@
 
 import { ipCacheManager } from './ip-cache.js';
 import { detectHomographAttack, detectDGAPattern, calculateStringSimilarity } from './string-utils.js';
+import { privacyConsentManager } from './privacy-consent.js';
 
 // CRITICAL FIX P1: IP cache migrated to persistent storage module
 const ipCache = ipCacheManager.ipCache;
@@ -10,6 +11,9 @@ const ipRequestQueue = ipCacheManager.ipRequestQueue;
 
 /**
  * Resolves IP addresses for a hostname using DNS over HTTPS (DoH)
+ *
+ * P0-NEW-4: GDPR compliance - requires privacy consent before DNS lookup
+ *
  * @param {string} hostname - The hostname to resolve
  * @returns {Promise<Object>} IP information including IPv4/IPv6 addresses and geolocation data
  */
@@ -26,8 +30,32 @@ export async function resolveIPAddresses(hostname) {
     isVPN: false,
     isTor: false,
     isProxy: false,
-    threatLevel: 'low'
+    threatLevel: 'low',
+    consentRequired: false // P0-NEW-4: Track if consent was missing
   };
+
+  // P0-NEW-4: Check privacy consent before DNS lookup (GDPR)
+  // Defensive: check if module exists
+  if (!privacyConsentManager) {
+    console.warn('Hera: Privacy consent module not loaded - skipping DNS lookup');
+    ipInfo.consentRequired = true;
+    return ipInfo;
+  }
+
+  let hasConsent = false;
+  try {
+    hasConsent = await privacyConsentManager.hasPrivacyConsent();
+  } catch (error) {
+    console.error('Hera: Privacy consent check failed - skipping DNS lookup:', error);
+    ipInfo.consentRequired = true;
+    return ipInfo;
+  }
+
+  if (!hasConsent) {
+    console.log('Hera: Skipping DNS lookup - no privacy consent');
+    ipInfo.consentRequired = true;
+    return ipInfo;
+  }
 
   try {
     // Use DNS over HTTPS to resolve IP addresses
@@ -82,10 +110,33 @@ export async function resolveIPAddresses(hostname) {
 
 /**
  * Gets IP geolocation data using ipapi.co API with caching and rate limiting
+ *
+ * P0-NEW-4: GDPR compliance - requires privacy consent before IP geolocation
+ *
  * @param {string} ip - The IP address to look up
  * @returns {Promise<Object|null>} Geolocation data or null if cached/rate-limited
  */
 export async function getIPGeolocation(ip) {
+  // P0-NEW-4: Check privacy consent before IP geolocation (GDPR)
+  // Defensive: check if module exists
+  if (!privacyConsentManager) {
+    console.warn('Hera: Privacy consent module not loaded - skipping IP geolocation');
+    return null;
+  }
+
+  let hasConsent = false;
+  try {
+    hasConsent = await privacyConsentManager.hasPrivacyConsent();
+  } catch (error) {
+    console.error('Hera: Privacy consent check failed - skipping IP geolocation:', error);
+    return null;
+  }
+
+  if (!hasConsent) {
+    console.log('Hera: Skipping IP geolocation - no privacy consent');
+    return null;
+  }
+
   // Check cache first
   if (ipCache.has(ip)) {
     console.log(`Using cached IP data for ${ip}`);

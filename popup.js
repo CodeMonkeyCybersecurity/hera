@@ -384,6 +384,73 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // P0-NEW-4: Privacy consent checkbox handler
+  const enablePrivacyConsentCheckbox = document.getElementById('enablePrivacyConsent');
+  const privacyConsentStatus = document.getElementById('privacyConsentStatus');
+
+  if (enablePrivacyConsentCheckbox) {
+    enablePrivacyConsentCheckbox.addEventListener('change', async (e) => {
+      const enabled = e.target.checked;
+
+      if (enabled) {
+        // Grant privacy consent
+        try {
+          const consent = {
+            granted: true,
+            timestamp: new Date().toISOString(),
+            version: 1
+          };
+          await chrome.storage.local.set({ heraPrivacyConsent: consent });
+          console.log('Privacy consent granted');
+          updatePrivacyConsentStatus();
+        } catch (error) {
+          console.error('Failed to grant privacy consent:', error);
+          e.target.checked = false;
+        }
+      } else {
+        // Withdraw privacy consent
+        try {
+          await chrome.storage.local.remove(['heraPrivacyConsent']);
+          console.log('Privacy consent withdrawn');
+          updatePrivacyConsentStatus();
+        } catch (error) {
+          console.error('Failed to withdraw privacy consent:', error);
+        }
+      }
+    });
+  }
+
+  // P0-NEW-4: Update privacy consent status display
+  async function updatePrivacyConsentStatus() {
+    try {
+      const result = await chrome.storage.local.get(['heraPrivacyConsent']);
+      const consent = result.heraPrivacyConsent;
+
+      if (consent && consent.granted) {
+        const consentDate = new Date(consent.timestamp);
+        const expiryDate = new Date(consentDate.getTime() + (365 * 24 * 60 * 60 * 1000)); // 1 year
+
+        if (privacyConsentStatus) {
+          privacyConsentStatus.textContent = `Consent granted on ${consentDate.toLocaleDateString()}. Expires ${expiryDate.toLocaleDateString()}.`;
+          privacyConsentStatus.style.color = '#28a745';
+        }
+        if (enablePrivacyConsentCheckbox) {
+          enablePrivacyConsentCheckbox.checked = true;
+        }
+      } else {
+        if (privacyConsentStatus) {
+          privacyConsentStatus.textContent = 'No consent granted. DNS and IP geolocation features are disabled.';
+          privacyConsentStatus.style.color = '#dc3545';
+        }
+        if (enablePrivacyConsentCheckbox) {
+          enablePrivacyConsentCheckbox.checked = false;
+        }
+      }
+    } catch (error) {
+      console.error('Failed to update privacy consent status:', error);
+    }
+  }
+
   // Load current settings
   function loadSettings() {
     chrome.storage.local.get(['enableResponseCapture'], (result) => {
@@ -392,6 +459,9 @@ document.addEventListener('DOMContentLoaded', () => {
         enableResponseCaptureCheckbox.checked = enabled;
       }
     });
+
+    // P0-NEW-4: Load privacy consent status
+    updatePrivacyConsentStatus();
   }
 
   // Set up event listeners with error handling

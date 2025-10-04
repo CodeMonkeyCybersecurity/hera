@@ -125,8 +125,29 @@ export function sanitizeProbeHeaders(headers) {
  */
 export async function performAlgNoneProbe(originalRequest, jwt, sender) {
   // P0 FIX: Check user consent FIRST before any probe
+  // P0-NEW-3: Defensive coding - prevent bypass if module fails to load
+  if (!probeConsentManager) {
+    console.error('Hera SECURITY: probeConsentManager not loaded - blocking probe');
+    return {
+      success: false,
+      error: 'Security module failed to load. Probes are disabled for safety.',
+      requiresConsent: true
+    };
+  }
+
   const targetDomain = new URL(originalRequest.url).hostname;
-  const hasConsent = await probeConsentManager.hasConsent('alg_none', targetDomain);
+  let hasConsent = false;
+
+  try {
+    hasConsent = await probeConsentManager.hasConsent('alg_none', targetDomain);
+  } catch (error) {
+    console.error('Hera SECURITY: Consent check failed - blocking probe:', error);
+    return {
+      success: false,
+      error: 'Consent system error. Probes are disabled for safety.',
+      requiresConsent: true
+    };
+  }
 
   if (!hasConsent) {
     return {
@@ -194,7 +215,14 @@ export async function performAlgNoneProbe(originalRequest, jwt, sender) {
     const result = { success: response.ok, status: response.status, statusText: response.statusText };
 
     // P0 FIX: Log probe execution for forensics and legal defense
-    await probeConsentManager.logProbeExecution('alg_none', originalRequest.url, result);
+    // P0-NEW-3: Defensive - don't fail if logging fails
+    try {
+      if (probeConsentManager) {
+        await probeConsentManager.logProbeExecution('alg_none', originalRequest.url, result);
+      }
+    } catch (logError) {
+      console.error('Hera: Failed to log probe execution:', logError);
+    }
 
     return result;
 
@@ -203,7 +231,14 @@ export async function performAlgNoneProbe(originalRequest, jwt, sender) {
     const result = { success: false, error: error.message };
 
     // Log failed probe attempts too
-    await probeConsentManager.logProbeExecution('alg_none', originalRequest.url, result);
+    // P0-NEW-3: Defensive - don't fail if logging fails
+    try {
+      if (probeConsentManager) {
+        await probeConsentManager.logProbeExecution('alg_none', originalRequest.url, result);
+      }
+    } catch (logError) {
+      console.error('Hera: Failed to log probe execution:', logError);
+    }
 
     return result;
   }
@@ -241,8 +276,29 @@ export async function performRepeaterRequest(rawRequest, sender) {
     const url = requestLine[1];
 
     // P0 FIX: Check user consent FIRST before any probe
+    // P0-NEW-3: Defensive coding - prevent bypass if module fails to load
+    if (!probeConsentManager) {
+      console.error('Hera SECURITY: probeConsentManager not loaded - blocking repeater');
+      return {
+        success: false,
+        error: 'Security module failed to load. HTTP Repeater is disabled for safety.',
+        requiresConsent: true
+      };
+    }
+
     const targetDomain = new URL(url).hostname;
-    const hasConsent = await probeConsentManager.hasConsent('repeater', targetDomain);
+    let hasConsent = false;
+
+    try {
+      hasConsent = await probeConsentManager.hasConsent('repeater', targetDomain);
+    } catch (error) {
+      console.error('Hera SECURITY: Consent check failed - blocking repeater:', error);
+      return {
+        success: false,
+        error: 'Consent system error. HTTP Repeater is disabled for safety.',
+        requiresConsent: true
+      };
+    }
 
     if (!hasConsent) {
       return {
@@ -312,9 +368,16 @@ export async function performRepeaterRequest(rawRequest, sender) {
     const result = { rawResponse: rawResponse, success: response.ok, status: response.status };
 
     // P0 FIX: Log probe execution for forensics
-    const lines = rawRequest.split('\n');
-    const url = lines[0].split(' ')[1];
-    await probeConsentManager.logProbeExecution('repeater', url, result);
+    // P0-NEW-3: Defensive - don't fail if logging fails
+    try {
+      if (probeConsentManager) {
+        const lines = rawRequest.split('\n');
+        const url = lines[0].split(' ')[1];
+        await probeConsentManager.logProbeExecution('repeater', url, result);
+      }
+    } catch (logError) {
+      console.error('Hera: Failed to log repeater execution:', logError);
+    }
 
     return result;
 
@@ -323,12 +386,15 @@ export async function performRepeaterRequest(rawRequest, sender) {
     const result = { error: error.message, success: false };
 
     // Log failed attempts too
+    // P0-NEW-3: Defensive - don't fail if logging fails
     try {
-      const lines = rawRequest.split('\n');
-      const url = lines[0].split(' ')[1];
-      await probeConsentManager.logProbeExecution('repeater', url, result);
+      if (probeConsentManager) {
+        const lines = rawRequest.split('\n');
+        const url = lines[0].split(' ')[1];
+        await probeConsentManager.logProbeExecution('repeater', url, result);
+      }
     } catch (logError) {
-      console.error('Failed to log repeater execution:', logError);
+      console.error('Hera: Failed to log repeater execution:', logError);
     }
 
     return result;

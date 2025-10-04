@@ -55,6 +55,20 @@
             Shows browser debugging banner but provides complete OAuth/SAML debugging.
           </p>
         </div>
+
+        <!-- P0-NEW-4: Privacy Consent Setting (GDPR) -->
+        <div class="setting-item">
+          <label>
+            <input type="checkbox" id="enablePrivacyConsent">
+            <span class="setting-label">Enable DNS & IP Geolocation (Third-Party Data Sharing)</span>
+          </label>
+          <p class="setting-description">
+            <strong>GDPR Notice:</strong> Shares domain names with Cloudflare DNS and IP addresses with IPapi.co.
+            Required for IP geolocation, threat intelligence, and country/ISP detection.
+            <a href="privacy-consent.html" target="_blank" id="privacyConsentLink">View Privacy Details</a>
+          </p>
+          <p class="setting-description" id="privacyConsentStatus" style="margin-top: 8px; font-style: italic;"></p>
+        </div>
       </div>
     </div>
     

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Hera - Privacy Consent Required</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+      line-height: 1.6;
+    }
+
+    .consent-container {
+      background: white;
+      border-radius: 8px;
+      padding: 30px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      color: #dc3545;
+      margin-top: 0;
+      font-size: 24px;
+    }
+
+    h2 {
+      color: #333;
+      font-size: 18px;
+      margin-top: 25px;
+    }
+
+    .warning-box {
+      background: #fff3cd;
+      border: 2px solid #ffc107;
+      border-radius: 6px;
+      padding: 15px;
+      margin: 20px 0;
+    }
+
+    .info-box {
+      background: #e7f3ff;
+      border: 2px solid #2196F3;
+      border-radius: 6px;
+      padding: 15px;
+      margin: 20px 0;
+    }
+
+    ul {
+      margin: 10px 0;
+      padding-left: 25px;
+    }
+
+    li {
+      margin: 8px 0;
+    }
+
+    .consent-actions {
+      margin-top: 30px;
+      display: flex;
+      gap: 15px;
+    }
+
+    button {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .grant-btn {
+      background: #28a745;
+      color: white;
+      flex: 1;
+    }
+
+    .grant-btn:hover {
+      background: #218838;
+    }
+
+    .decline-btn {
+      background: #6c757d;
+      color: white;
+      flex: 1;
+    }
+
+    .decline-btn:hover {
+      background: #5a6268;
+    }
+
+    .status {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 6px;
+      display: none;
+    }
+
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    code {
+      background: #f4f4f4;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+    }
+
+    .gdpr-notice {
+      margin-top: 30px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-left: 4px solid #dc3545;
+      font-size: 14px;
+    }
+
+    strong {
+      color: #dc3545;
+    }
+  </style>
+</head>
+<body>
+  <div class="consent-container">
+    <h1>🔒 Privacy Consent Required</h1>
+
+    <div class="warning-box">
+      <strong>⚠️ GDPR Notice:</strong> Hera shares your browsing data with third-party services to provide DNS and IP geolocation analysis. Under GDPR, we must obtain your explicit consent before sharing any data.
+    </div>
+
+    <h2>What Data Is Shared?</h2>
+    <p>When you visit a website, Hera shares the following information with third parties:</p>
+    <ul>
+      <li><strong>Domain names</strong> you visit (e.g., <code>example.com</code>)</li>
+      <li><strong>IP addresses</strong> resolved from those domains</li>
+      <li><strong>Timestamps</strong> of when you accessed those domains</li>
+    </ul>
+
+    <h2>Which Third Parties?</h2>
+    <div class="info-box">
+      <p><strong>1. Cloudflare DNS (cloudflare-dns.com)</strong></p>
+      <ul>
+        <li>Purpose: Resolve domain names to IP addresses</li>
+        <li>Data shared: Domain names, timestamps</li>
+        <li>Privacy policy: <a href="https://www.cloudflare.com/privacypolicy/" target="_blank">cloudflare.com/privacypolicy</a></li>
+      </ul>
+
+      <p><strong>2. IPapi.co (ipapi.co)</strong></p>
+      <ul>
+        <li>Purpose: Get geolocation and threat intelligence for IP addresses</li>
+        <li>Data shared: IP addresses</li>
+        <li>Privacy policy: <a href="https://ipapi.co/privacy/" target="_blank">ipapi.co/privacy</a></li>
+      </ul>
+    </div>
+
+    <h2>What Happens If You Decline?</h2>
+    <ul>
+      <li>✅ Hera will still capture authentication requests</li>
+      <li>✅ Local security analysis will still work</li>
+      <li>❌ No DNS resolution or IP geolocation data</li>
+      <li>❌ No threat intelligence (VPN/Tor/Proxy detection)</li>
+      <li>❌ No country/city/ISP information</li>
+    </ul>
+
+    <h2>Your GDPR Rights</h2>
+    <ul>
+      <li><strong>Right to withdraw:</strong> You can withdraw consent anytime in Hera settings</li>
+      <li><strong>Data minimization:</strong> We only share the minimum data needed for functionality</li>
+      <li><strong>No retention:</strong> Hera does not store your data on our servers (it's local-only)</li>
+      <li><strong>Third-party retention:</strong> Cloudflare and IPapi may retain logs per their policies</li>
+    </ul>
+
+    <div class="gdpr-notice">
+      <strong>Legal Basis:</strong> By granting consent, you authorize Hera to share your browsing data with Cloudflare DNS and IPapi.co for security analysis purposes. This consent is valid for 1 year and can be withdrawn at any time in extension settings.
+    </div>
+
+    <div class="consent-actions">
+      <button class="grant-btn" id="grantBtn">Grant Consent</button>
+      <button class="decline-btn" id="declineBtn">Decline</button>
+    </div>
+
+    <div class="status" id="statusMessage"></div>
+  </div>
+
+  <script src="privacy-consent-ui.js"></script>
+</body>
+</html>
