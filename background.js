@@ -14,8 +14,11 @@ import { memoryManager } from './modules/memory-manager.js';
 import { sessionTracker } from './modules/session-tracker.js';
 import { ipCacheManager } from './modules/ip-cache.js';
 
+// DNS and IP intelligence module (Phase 1 modularization)
+import { resolveIPAddresses, getIPGeolocation, gatherDNSIntelligence, detectSuspiciousDomainPatterns } from './modules/dns-intelligence.js';
+
 // Pure utility modules (Phase 1 modularization)
-import { detectHomographAttack, detectDGAPattern } from './modules/string-utils.js';
+import { detectHomographAttack, detectDGAPattern, calculateStringSimilarity, levenshteinDistance } from './modules/string-utils.js';
 import { parseCookieHeader, analyzeSetCookie, isSessionCookie, isAuthCookie } from './modules/cookie-utils.js';
 import { analyzeJWT } from './modules/jwt-utils.js';
 import { detectAuthType } from './modules/auth-utils.js';
@@ -1455,254 +1458,11 @@ chrome.permissions.onRemoved.addListener((permissions) => {
 // - analyzeAuthFlow, analyzeOAuthConsent, detectAuthProvider, analyzeScopeRisks,
 //   analyzeRedirectUri, generateConsentWarnings, analyzeAuthFailure
 
-// IP Address resolution and geolocation
-async function resolveIPAddresses(hostname) {
-  const ipInfo = {
-    ipv4Addresses: [],
-    ipv6Addresses: [],
-    geoLocations: [],
-    asn: null,
-    organization: null,
-    country: null,
-    city: null,
-    isp: null,
-    isVPN: false,
-    isTor: false,
-    isProxy: false,
-    threatLevel: 'low'
-  };
-
-  try {
-    // Use DNS over HTTPS to resolve IP addresses
-    const dohEndpoint = `https://cloudflare-dns.com/dns-query?name=${hostname}&type=A`;
-    
-    const response = await fetch(dohEndpoint, {
-      headers: {
-        'Accept': 'application/dns-json'
-      }
-    });
-    
-    if (response.ok) {
-      const dnsData = await response.json();
-      
-      if (dnsData.Answer) {
-        for (const record of dnsData.Answer) {
-          if (record.type === 1) { // A record (IPv4)
-            const ip = record.data;
-            ipInfo.ipv4Addresses.push(ip);
-            
-            // Get geolocation for each IP
-            const geoData = await getIPGeolocation(ip);
-            if (geoData) {
-              ipInfo.geoLocations.push({
-                ip: ip,
-                ...geoData
-              });
-              
-              // Use first IP's data for main fields
-              if (!ipInfo.country) {
-                ipInfo.country = geoData.country;
-                ipInfo.city = geoData.city;
-                ipInfo.asn = geoData.asn;
-                ipInfo.organization = geoData.organization;
-                ipInfo.isp = geoData.isp;
-                ipInfo.isVPN = geoData.isVPN;
-                ipInfo.isTor = geoData.isTor;
-                ipInfo.isProxy = geoData.isProxy;
-                ipInfo.threatLevel = geoData.threatLevel;
-              }
-            }
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.log(`DNS resolution failed for ${hostname}:`, error);
-  }
-
-  return ipInfo;
-}
-
-// CRITICAL FIX P1: IP cache migrated to persistent storage module
-const ipCache = ipCacheManager.ipCache;
-const ipRequestQueue = ipCacheManager.ipRequestQueue;
-
-async function getIPGeolocation(ip) {
-  // Check cache first
-  if (ipCache.has(ip)) {
-    console.log(`Using cached IP data for ${ip}`);
-    return ipCache.get(ip);
-  }
-  
-  // Prevent duplicate requests
-  if (ipRequestQueue.has(ip)) {
-    console.log(`IP request already in progress for ${ip}`);
-    return null;
-  }
-  
-  // Rate limiting - only allow IP lookups for legitimate security analysis
-  if (ipCache.size > 10) {
-    console.log(`IP cache limit reached, skipping lookup for ${ip}`);
-    return null;
-  }
-  
-  // Skip IP lookups entirely for known legitimate services to prevent 429 errors
-  const knownLegitimateIPs = [
-    '160.79.104.10', // Claude.ai
-    '151.101.0.176', '151.101.128.176', '151.101.64.176', '151.101.192.176' // Fastly CDN
-  ];
-  
-  if (knownLegitimateIPs.includes(ip)) {
-    console.log(`Skipping IP lookup for known legitimate IP: ${ip}`);
-    return null;
-  }
-  
-  // Skip IP lookups for known legitimate IP ranges (optional optimization)
-  // Most IPs will be processed, but we can skip obvious ones
-  
-  // CRITICAL FIX P1: Use cache manager method to persist
-  ipCacheManager.addToQueue(ip);
-  
-  try {
-    console.log(`Looking up IP geolocation for ${ip}`);
-    const response = await fetch(`https://ipapi.co/${ip}/json/`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    const geoData = {
-      ip: ip,
-      country: data.country_name || 'Unknown',
-      city: data.city || 'Unknown',
-      region: data.region || 'Unknown',
-      isp: data.org || 'Unknown ISP',
-      asn: data.asn || 'Unknown',
-      timezone: data.timezone || 'Unknown',
-      isVPN: data.threat?.is_anonymous || false,
-      isTor: data.threat?.is_tor || false,
-      isProxy: data.threat?.is_proxy || false,
-      threatLevel: data.threat?.threat_types?.length > 0 ? 'high' : 'low'
-    };
-    
-    // Cache the result
-    // CRITICAL FIX P1: Use cache manager method to persist
-    ipCacheManager.setCacheEntry(ip, geoData);
-    console.log(`IP geolocation cached for ${ip}: ${geoData.city}, ${geoData.country}`);
-    
-    return geoData;
-  } catch (error) {
-    console.log(`IP geolocation failed for ${ip}:`, error);
-    return null;
-  } finally {
-    // CRITICAL FIX P1: Use cache manager method to persist
-    ipCacheManager.removeFromQueue(ip);
-  }
-}
-
-// Gather DNS intelligence for domain analysis with IP resolution
-async function gatherDNSIntelligence(url, requestId) {
-  try {
-    const hostname = new URL(url).hostname;
-    
-    // Resolve IP addresses first
-    const ipInfo = await resolveIPAddresses(hostname);
-    
-    const intelligence = {
-      hostname: hostname,
-      isNewDomain: false,
-      isDGA: false,
-      isHomograph: false,
-      cdnProvider: null,
-      suspiciousPatterns: [],
-      whoisAge: null,
-      ipAddresses: ipInfo, // Add IP information
-      dnsRecords: {
-        aRecords: ipInfo.ipv4Addresses,
-        aaaaRecords: ipInfo.ipv6Addresses,
-        cnameRecords: [],
-        mxRecords: [],
-        txtRecords: [],
-        nsRecords: []
-      },
-      networkPath: {
-        resolverUsed: 'cloudflare-dns.com',
-        ttlValues: [],
-        responseTime: null,
-        isDohUsed: true
-      },
-      geoLocation: {
-        country: ipInfo.country,
-        city: ipInfo.city,
-        asn: ipInfo.asn,
-        organization: ipInfo.organization,
-        isp: ipInfo.isp,
-        isVPN: ipInfo.isVPN,
-        isTor: ipInfo.isTor,
-        isProxy: ipInfo.isProxy,
-        threatLevel: ipInfo.threatLevel
-      }
-    };
-    
-    // Check for homograph attacks (Unicode lookalikes)
-    intelligence.isHomograph = detectHomographAttack(hostname);
-    
-    // Check for Domain Generation Algorithm patterns
-    intelligence.isDGA = detectDGAPattern(hostname);
-    
-    // Check for suspicious TLDs and patterns
-    intelligence.suspiciousPatterns = detectSuspiciousDomainPatterns(hostname);
-    
-    // Update the stored request with DNS intelligence
-    const requestData = authRequests.get(requestId);
-    if (requestData) {
-      requestData.metadata.dnsIntelligence = intelligence;
-      authRequests.set(requestId, requestData);
-    }
-    
-  } catch (error) {
-    console.log('DNS intelligence gathering failed:', error);
-  }
-}
-
-// (Removed duplicate detectHomographAttack, detectDGAPattern - now imported from ./modules/string-utils.js at line 18)
-
-// Detect suspicious domain patterns
-function detectSuspiciousDomainPatterns(hostname) {
-  const patterns = [];
-  
-  // Suspicious TLDs
-  const suspiciousTLDs = ['.tk', '.ml', '.ga', '.cf', '.pw', '.top', '.click', '.download'];
-  if (suspiciousTLDs.some(tld => hostname.endsWith(tld))) {
-    patterns.push('suspicious_tld');
-  }
-  
-  // Typosquatting patterns
-  const legitimateDomains = ['google.com', 'microsoft.com', 'github.com', 'facebook.com'];
-  legitimateDomains.forEach(legit => {
-    if (hostname !== legit && calculateStringSimilarity(hostname, legit) > 0.7) {
-      patterns.push('typosquatting_' + legit.replace('.com', ''));
-    }
-  });
-  
-  // Subdomain abuse
-  const subdomainCount = hostname.split('.').length - 2;
-  if (subdomainCount > 3) {
-    patterns.push('excessive_subdomains');
-  }
-  
-  // URL shortener domains
-  const shorteners = ['bit.ly', 'tinyurl.com', 't.co', 'goo.gl', 'ow.ly'];
-  if (shorteners.includes(hostname)) {
-    patterns.push('url_shortener');
-  }
-  
-  return patterns;
+// NOTE: DNS/IP intelligence functions now imported from ./modules/dns-intelligence.js at line 18
+// - resolveIPAddresses, getIPGeolocation, gatherDNSIntelligence, detectSuspiciousDomainPatterns
+// Wrapper function to maintain compatibility with existing code that doesn't pass authRequests
+async function gatherDNSIntelligenceWrapper(url, requestId) {
+  return gatherDNSIntelligence(url, requestId, authRequests);
 }
 
 // Analyze CDN and infrastructure from response headers
@@ -1772,45 +1532,7 @@ function analyzeCDNFromHeaders(responseHeaders, url) {
   return analysis;
 }
 
-// Calculate string similarity for homograph detection
-function calculateStringSimilarity(str1, str2) {
-  const longer = str1.length > str2.length ? str1 : str2;
-  const shorter = str1.length > str2.length ? str2 : str1;
-  
-  if (longer.length === 0) return 1.0;
-  
-  const editDistance = levenshteinDistance(longer, shorter);
-  return (longer.length - editDistance) / longer.length;
-}
-
-// Levenshtein distance calculation
-function levenshteinDistance(str1, str2) {
-  const matrix = [];
-  
-  for (let i = 0; i <= str2.length; i++) {
-    matrix[i] = [i];
-  }
-  
-  for (let j = 0; j <= str1.length; j++) {
-    matrix[0][j] = j;
-  }
-  
-  for (let i = 1; i <= str2.length; i++) {
-    for (let j = 1; j <= str1.length; j++) {
-      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
-        );
-      }
-    }
-  }
-  
-  return matrix[str2.length][str1.length];
-}
+// NOTE: calculateStringSimilarity and levenshteinDistance now imported from ./modules/string-utils.js at line 21
 
 // Exposed Backend Detection
 async function scanForExposedBackends(domain) {
