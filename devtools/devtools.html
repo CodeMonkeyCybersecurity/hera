@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Hera - DevTools</title>
+  <link rel="stylesheet" href="devtools.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Hera</h1>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="requests">Requests</button>
+      <button class="tab-btn" data-tab="tokens">Tokens</button>
+      <button class="tab-btn" data-tab="security">Security</button>
+    </div>
+    
+    <div class="tab-content active" id="requestsTab">
+      <div class="toolbar">
+        <button id="recordBtn" class="active">
+          <span class="icon">●</span> Recording
+        </button>
+        <button id="clearBtn">Clear All</button>
+        <div class="filter">
+          <input type="text" id="filterInput" placeholder="Filter requests...">
+        </div>
+      </div>
+      <div class="requests-list" id="requestsList">
+        <div class="empty-state">
+          <p>No authentication requests captured yet.</p>
+          <p>Navigate to a website that uses OAuth, OIDC, SAML, or SCIM.</p>
+        </div>
+      </div>
+    </div>
+    
+    <div class="tab-content" id="tokensTab">
+      <div class="token-viewer" id="tokenViewer">
+        <div class="empty-state">
+          <p>No tokens detected yet.</p>
+          <p>Navigate to a website that uses OAuth or OIDC to see token details.</p>
+        </div>
+      </div>
+    </div>
+    
+    <div class="tab-content" id="securityTab">
+      <div class="security-findings" id="securityFindings">
+        <div class="empty-state">
+          <p>No security analysis available yet.</p>
+          <p>Navigate to a website that uses authentication to see security analysis.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="devtools.js"></script>
+</body>
+</html>

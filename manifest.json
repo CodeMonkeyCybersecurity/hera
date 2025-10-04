@@ -1,0 +1,72 @@
+{
+  "manifest_version": 3,
+  "name": "Hera by Code Monkey Cybersecurity",
+  "version": "1.0",
+  "description": "All-in-one security extension: detects phishing, dark patterns, privacy violations, and accessibility issues. Also inspects OAuth/OIDC/SAML flows. Uses ipapi.co for IP geolocation (see privacy policy).",
+  "permissions": [
+    "storage",
+    "downloads",
+    "activeTab",
+    "alarms",
+    "notifications",
+    "webRequest",
+    "webRequestAuthProvider",
+    "identity",
+    "tabs",
+    "debugger",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "response-interceptor.js",
+        "site-reputation-overlay.js",
+        "modules/dark-pattern-detector.js",
+        "modules/phishing-detector.js",
+        "modules/privacy-violation-detector.js",
+        "modules/risk-scoring-engine.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": [
+        "modules/subdomain-impersonation-detector.js",
+        "modules/dark-pattern-detector.js",
+        "modules/phishing-detector.js",
+        "modules/privacy-violation-detector.js",
+        "modules/risk-scoring-engine.js",
+        "content-script.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://ip-api.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';"
+  },
+  "devtools_page": "devtools/devtools.html"
+}

@@ -1,0 +1,728 @@
+// Accessibility Analyzer - Detects accessibility issues and WCAG violations
+// Identifies color contrast, missing alt text, keyboard navigation, and ARIA issues
+
+class AccessibilityAnalyzer {
+  constructor() {
+    // WCAG 2.1 thresholds
+    this.wcag = {
+      contrastAA: 4.5,      // Normal text AA
+      contrastAALarge: 3.0, // Large text AA
+      contrastAAA: 7.0,     // Normal text AAA
+      contrastAAALarge: 4.5, // Large text AAA
+      minTextSize: 12,      // Minimum readable text size (px)
+      minTouchTarget: 44    // Minimum touch target size (px) - WCAG 2.5.5
+    };
+
+    // Common semantic HTML elements
+    this.semanticElements = [
+      'header', 'nav', 'main', 'article', 'section', 'aside', 'footer',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6'
+    ];
+  }
+
+  // PERFORMANCE FIX P1-2a: Helper to check if element is visible
+  isElementVisible(element) {
+    if (!element) return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' &&
+           style.visibility !== 'hidden' &&
+           style.opacity !== '0' &&
+           element.offsetWidth > 0 &&
+           element.offsetHeight > 0;
+  }
+
+  // PERFORMANCE FIX P1-2a: Helper to filter visible elements
+  filterVisible(elements) {
+    return Array.from(elements).filter(el => this.isElementVisible(el));
+  }
+
+  // PERFORMANCE FIX P1-2b: Batch process elements with requestIdleCallback
+  async processInBatches(elements, processFunc, batchSize = 50) {
+    const results = [];
+    const batches = [];
+
+    for (let i = 0; i < elements.length; i += batchSize) {
+      batches.push(elements.slice(i, i + batchSize));
+    }
+
+    for (const batch of batches) {
+      await new Promise(resolve => {
+        if (typeof requestIdleCallback !== 'undefined') {
+          requestIdleCallback(() => {
+            results.push(...batch.map(processFunc));
+            resolve();
+          }, { timeout: 1000 });
+        } else {
+          setTimeout(() => {
+            results.push(...batch.map(processFunc));
+            resolve();
+          }, 0);
+        }
+      });
+    }
+
+    return results;
+  }
+
+  // Main detection method
+  async analyzeAccessibility(document) {
+    const findings = [];
+
+    // Run all analysis methods
+    findings.push(...await this.analyzeColorContrast(document));
+    findings.push(...await this.analyzeMissingAltText(document));
+    findings.push(...await this.analyzeKeyboardNavigation(document));
+    findings.push(...await this.analyzeARIAIssues(document));
+    findings.push(...await this.analyzeFormLabels(document));
+    findings.push(...await this.analyzeHeadingStructure(document));
+    findings.push(...await this.analyzeTextSize(document));
+    findings.push(...await this.analyzeTouchTargets(document));
+    findings.push(...await this.analyzeSemanticHTML(document));
+
+    return findings;
+  }
+
+  // Analyze color contrast (WCAG 1.4.3, 1.4.6)
+  async analyzeColorContrast(document) {
+    const findings = [];
+
+    // PERFORMANCE FIX P1-2a: Sample visible text elements only for contrast checking
+    const textElements = this.filterVisible(document.querySelectorAll('p, a, span, div, h1, h2, h3, h4, h5, h6, li, td, th, label, button'));
+    const violationsSummary = { AA: 0, AAA: 0, elements: [] };
+
+    for (const element of textElements) {
+      const style = window.getComputedStyle(element);
+      const color = style.color;
+      const backgroundColor = this.getBackgroundColor(element);
+
+      if (!backgroundColor) continue;
+
+      const contrast = this.calculateContrast(color, backgroundColor);
+      const fontSize = parseInt(style.fontSize);
+      const fontWeight = style.fontWeight;
+
+      // Determine if text is "large" (18pt+ or 14pt+ bold)
+      const isLargeText = fontSize >= 24 || (fontSize >= 19 && (fontWeight === 'bold' || parseInt(fontWeight) >= 700));
+
+      const requiredAA = isLargeText ? this.wcag.contrastAALarge : this.wcag.contrastAA;
+      const requiredAAA = isLargeText ? this.wcag.contrastAAALarge : this.wcag.contrastAAA;
+
+      // Check violations
+      if (contrast < requiredAA) {
+        violationsSummary.AA++;
+        violationsSummary.elements.push({
+          text: element.innerText.substring(0, 50),
+          contrast: contrast.toFixed(2),
+          required: requiredAA,
+          color: color,
+          backgroundColor: backgroundColor
+        });
+      } else if (contrast < requiredAAA) {
+        violationsSummary.AAA++;
+      }
+    }
+
+    // Report summary if violations found
+    if (violationsSummary.AA > 0) {
+      findings.push({
+        type: 'accessibility',
+        category: 'color_contrast_aa',
+        severity: 'high',
+        title: 'WCAG AA Color Contrast Violations',
+        description: `${violationsSummary.AA} elements fail WCAG AA contrast requirements`,
+        evidence: {
+          violationCount: violationsSummary.AA,
+          wcagLevel: 'AA',
+          requiredContrast: this.wcag.contrastAA,
+          examples: violationsSummary.elements.slice(0, 5),
+          standard: 'WCAG 2.1 Level AA (1.4.3)'
+        },
+        recommendation: 'Increase contrast between text and background to meet WCAG AA (4.5:1 for normal text, 3:1 for large text)',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    if (violationsSummary.AAA > 0 && violationsSummary.AA === 0) {
+      findings.push({
+        type: 'accessibility',
+        category: 'color_contrast_aaa',
+        severity: 'medium',
+        title: 'WCAG AAA Color Contrast Violations',
+        description: `${violationsSummary.AAA} elements fail WCAG AAA contrast requirements`,
+        evidence: {
+          violationCount: violationsSummary.AAA,
+          wcagLevel: 'AAA',
+          requiredContrast: this.wcag.contrastAAA,
+          standard: 'WCAG 2.1 Level AAA (1.4.6)'
+        },
+        recommendation: 'Consider increasing contrast to meet WCAG AAA (7:1 for normal text, 4.5:1 for large text)',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return findings;
+  }
+
+  // Analyze missing alt text (WCAG 1.1.1)
+  async analyzeMissingAltText(document) {
+    const findings = [];
+
+    // PERFORMANCE FIX P1-2a: Filter visible images only
+    const images = this.filterVisible(document.querySelectorAll('img'));
+    const missingAlt = [];
+    const emptyAlt = [];
+    const decorativeImages = [];
+
+    for (const img of images) {
+      const alt = img.getAttribute('alt');
+      const role = img.getAttribute('role');
+
+      if (alt === null) {
+        // No alt attribute at all
+        missingAlt.push({
+          src: img.src,
+          location: this.getElementLocation(img)
+        });
+      } else if (alt === '' && role !== 'presentation') {
+        // Empty alt without role="presentation" (may be incorrectly marked as decorative)
+        emptyAlt.push({
+          src: img.src,
+          location: this.getElementLocation(img)
+        });
+      } else if (role === 'presentation' || alt === '') {
+        decorativeImages.push(img);
+      }
+    }
+
+    if (missingAlt.length > 0) {
+      findings.push({
+        type: 'accessibility',
+        category: 'missing_alt_text',
+        severity: 'critical',
+        title: 'Missing Alt Text on Images',
+        description: `${missingAlt.length} images lack alt attributes`,
+        evidence: {
+          missingCount: missingAlt.length,
+          examples: missingAlt.slice(0, 5),
+          standard: 'WCAG 2.1 Level A (1.1.1)'
+        },
+        recommendation: 'Add alt text to all images. Use empty alt="" only for decorative images.',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    if (emptyAlt.length > 5) {
+      findings.push({
+        type: 'accessibility',
+        category: 'excessive_empty_alt',
+        severity: 'medium',
+        title: 'Excessive Empty Alt Text',
+        description: `${emptyAlt.length} images have empty alt text`,
+        evidence: {
+          emptyAltCount: emptyAlt.length,
+          note: 'Empty alt should only be used for decorative images',
+          examples: emptyAlt.slice(0, 5)
+        },
+        recommendation: 'Verify that images with empty alt are truly decorative',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return findings;
+  }
+
+  // Analyze keyboard navigation (WCAG 2.1.1)
+  async analyzeKeyboardNavigation(document) {
+    const findings = [];
+
+    // PERFORMANCE FIX P1-2a: Filter visible interactive elements only
+    const interactiveElements = this.filterVisible(document.querySelectorAll('a, button, input, select, textarea, [tabindex]'));
+    const negativeTabindex = [];
+    const highTabindex = [];
+
+    for (const element of interactiveElements) {
+      const tabindex = element.getAttribute('tabindex');
+
+      if (tabindex !== null) {
+        const tabindexValue = parseInt(tabindex);
+
+        if (tabindexValue < 0 && tabindexValue !== -1) {
+          negativeTabindex.push(element);
+        }
+
+        if (tabindexValue > 0) {
+          highTabindex.push({
+            element: element.tagName,
+            tabindex: tabindexValue,
+            text: element.innerText?.substring(0, 30)
+          });
+        }
+      }
+    }
+
+    if (highTabindex.length > 0) {
+      findings.push({
+        type: 'accessibility',
+        category: 'tabindex_antipattern',
+        severity: 'high',
+        title: 'Positive Tabindex Values',
+        description: `${highTabindex.length} elements use positive tabindex values`,
+        evidence: {
+          count: highTabindex.length,
+          examples: highTabindex.slice(0, 5),
+          standard: 'WCAG 2.1 Level A (2.1.1)',
+          note: 'Positive tabindex disrupts natural tab order'
+        },
+        recommendation: 'Use tabindex="0" or rely on natural DOM order. Avoid positive tabindex.',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Check for missing focus indicators
+    const buttons = this.filterVisible(document.querySelectorAll('button, a, input, select, textarea'));
+    const noFocusIndicator = [];
+
+    for (const button of buttons) {
+      // Simulate focus and check for outline
+      // This is approximate - true testing requires actual focus events
+      const style = window.getComputedStyle(button);
+      if (style.outline === 'none' || style.outline === '0px') {
+        noFocusIndicator.push({
+          element: button.tagName,
+          text: button.innerText?.substring(0, 30)
+        });
+      }
+    }
+
+    if (noFocusIndicator.length > interactiveElements.length * 0.5) {
+      findings.push({
+        type: 'accessibility',
+        category: 'missing_focus_indicators',
+        severity: 'high',
+        title: 'Missing Focus Indicators',
+        description: 'Many interactive elements lack visible focus indicators',
+        evidence: {
+          affectedCount: noFocusIndicator.length,
+          totalInteractive: interactiveElements.length,
+          standard: 'WCAG 2.1 Level AA (2.4.7)',
+          examples: noFocusIndicator.slice(0, 5)
+        },
+        recommendation: 'Ensure all interactive elements have visible focus indicators',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return findings;
+  }
+
+  // Analyze ARIA issues (WCAG 4.1.2)
+  async analyzeARIAIssues(document) {
+    const findings = [];
+
+    // Check for invalid ARIA attributes
+    const elementsWithAria = this.filterVisible(document.querySelectorAll('[role], [aria-label], [aria-labelledby], [aria-describedby], [aria-hidden]'));
+    const invalidAria = [];
+
+    for (const element of elementsWithAria) {
+      const role = element.getAttribute('role');
+
+      // Check for invalid roles
+      const validRoles = [
+        'alert', 'alertdialog', 'application', 'article', 'banner', 'button',
+        'checkbox', 'columnheader', 'combobox', 'complementary', 'contentinfo',
+        'dialog', 'directory', 'document', 'feed', 'figure', 'form', 'grid',
+        'gridcell', 'group', 'heading', 'img', 'link', 'list', 'listbox',
+        'listitem', 'log', 'main', 'marquee', 'math', 'menu', 'menubar',
+        'menuitem', 'menuitemcheckbox', 'menuitemradio', 'navigation', 'none',
+        'note', 'option', 'presentation', 'progressbar', 'radio', 'radiogroup',
+        'region', 'row', 'rowgroup', 'rowheader', 'scrollbar', 'search',
+        'searchbox', 'separator', 'slider', 'spinbutton', 'status', 'switch',
+        'tab', 'table', 'tablist', 'tabpanel', 'term', 'textbox', 'timer',
+        'toolbar', 'tooltip', 'tree', 'treegrid', 'treeitem'
+      ];
+
+      if (role && !validRoles.includes(role)) {
+        invalidAria.push({
+          element: element.tagName,
+          role: role,
+          text: element.innerText?.substring(0, 30)
+        });
+      }
+
+      // Check for aria-hidden on focusable elements
+      const ariaHidden = element.getAttribute('aria-hidden');
+      const isFocusable = element.tabIndex >= 0 || ['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(element.tagName);
+
+      if (ariaHidden === 'true' && isFocusable) {
+        invalidAria.push({
+          element: element.tagName,
+          issue: 'aria-hidden on focusable element',
+          text: element.innerText?.substring(0, 30)
+        });
+      }
+    }
+
+    if (invalidAria.length > 0) {
+      findings.push({
+        type: 'accessibility',
+        category: 'invalid_aria',
+        severity: 'high',
+        title: 'Invalid ARIA Usage',
+        description: `${invalidAria.length} elements have invalid ARIA attributes`,
+        evidence: {
+          invalidCount: invalidAria.length,
+          examples: invalidAria.slice(0, 5),
+          standard: 'WCAG 2.1 Level A (4.1.2)'
+        },
+        recommendation: 'Fix invalid ARIA roles and avoid aria-hidden on focusable elements',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return findings;
+  }
+
+  // Analyze form labels (WCAG 3.3.2)
+  async analyzeFormLabels(document) {
+    const findings = [];
+
+    const inputs = this.filterVisible(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea'));
+    const unlabeled = [];
+
+    for (const input of inputs) {
+      const hasLabel = this.hasAccessibleLabel(input);
+
+      if (!hasLabel) {
+        unlabeled.push({
+          type: input.type || input.tagName,
+          id: input.id,
+          name: input.name,
+          placeholder: input.placeholder
+        });
+      }
+    }
+
+    if (unlabeled.length > 0) {
+      findings.push({
+        type: 'accessibility',
+        category: 'missing_form_labels',
+        severity: 'high',
+        title: 'Missing Form Labels',
+        description: `${unlabeled.length} form inputs lack accessible labels`,
+        evidence: {
+          unlabeledCount: unlabeled.length,
+          examples: unlabeled.slice(0, 5),
+          standard: 'WCAG 2.1 Level A (3.3.2)',
+          note: 'Placeholder text is not a substitute for labels'
+        },
+        recommendation: 'Add <label> elements or aria-label attributes to all form inputs',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return findings;
+  }
+
+  // Analyze heading structure (WCAG 1.3.1)
+  async analyzeHeadingStructure(document) {
+    const findings = [];
+
+    const headings = this.filterVisible(document.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+    const headingLevels = Array.from(headings).map(h => parseInt(h.tagName.substring(1)));
+
+    // Check for missing h1
+    if (!headings.length || headingLevels[0] !== 1) {
+      findings.push({
+        type: 'accessibility',
+        category: 'missing_h1',
+        severity: 'high',
+        title: 'Missing or Incorrect H1',
+        description: 'Page should start with exactly one <h1> element',
+        evidence: {
+          firstHeading: headings[0]?.tagName || 'none',
+          standard: 'WCAG 2.1 Level A (1.3.1)'
+        },
+        recommendation: 'Add a single <h1> element as the main page heading',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Check for skipped heading levels
+    const skips = [];
+    for (let i = 1; i < headingLevels.length; i++) {
+      const diff = headingLevels[i] - headingLevels[i - 1];
+      if (diff > 1) {
+        skips.push({
+          from: headingLevels[i - 1],
+          to: headingLevels[i],
+          position: i
+        });
+      }
+    }
+
+    if (skips.length > 0) {
+      findings.push({
+        type: 'accessibility',
+        category: 'skipped_heading_levels',
+        severity: 'medium',
+        title: 'Skipped Heading Levels',
+        description: 'Heading hierarchy has gaps (e.g., h2 → h4)',
+        evidence: {
+          skips: skips.slice(0, 5),
+          standard: 'WCAG 2.1 Level A (1.3.1)',
+          note: 'Headings should increase by one level at a time'
+        },
+        recommendation: 'Maintain logical heading hierarchy without skipping levels',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return findings;
+  }
+
+  // Analyze text size (WCAG 1.4.4)
+  async analyzeTextSize(document) {
+    const findings = [];
+
+    const textElements = this.filterVisible(document.querySelectorAll('p, span, div, li, td, a'));
+    const tooSmall = [];
+
+    for (const element of textElements) {
+      const style = window.getComputedStyle(element);
+      const fontSize = parseInt(style.fontSize);
+
+      if (fontSize < this.wcag.minTextSize && element.innerText.trim().length > 0) {
+        tooSmall.push({
+          fontSize: fontSize,
+          text: element.innerText.substring(0, 50)
+        });
+      }
+    }
+
+    if (tooSmall.length > textElements.length * 0.1) {
+      findings.push({
+        type: 'accessibility',
+        category: 'text_too_small',
+        severity: 'medium',
+        title: 'Text Size Too Small',
+        description: `${tooSmall.length} elements have text smaller than 12px`,
+        evidence: {
+          smallTextCount: tooSmall.length,
+          minRecommended: this.wcag.minTextSize,
+          examples: tooSmall.slice(0, 5),
+          standard: 'WCAG 2.1 Level AA (1.4.4)'
+        },
+        recommendation: 'Use minimum 12px font size for body text',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return findings;
+  }
+
+  // Analyze touch target sizes (WCAG 2.5.5)
+  async analyzeTouchTargets(document) {
+    const findings = [];
+
+    const interactive = this.filterVisible(document.querySelectorAll('button, a, input[type="button"], input[type="submit"], [role="button"]'));
+    const tooSmall = [];
+
+    for (const element of interactive) {
+      const rect = element.getBoundingClientRect();
+      const width = rect.width;
+      const height = rect.height;
+
+      if (width > 0 && height > 0 && (width < this.wcag.minTouchTarget || height < this.wcag.minTouchTarget)) {
+        tooSmall.push({
+          element: element.tagName,
+          width: Math.round(width),
+          height: Math.round(height),
+          text: element.innerText?.substring(0, 30)
+        });
+      }
+    }
+
+    if (tooSmall.length > 0) {
+      findings.push({
+        type: 'accessibility',
+        category: 'touch_target_size',
+        severity: 'medium',
+        title: 'Touch Targets Too Small',
+        description: `${tooSmall.length} interactive elements smaller than 44x44px`,
+        evidence: {
+          smallTargetCount: tooSmall.length,
+          minRecommended: `${this.wcag.minTouchTarget}x${this.wcag.minTouchTarget}px`,
+          examples: tooSmall.slice(0, 5),
+          standard: 'WCAG 2.1 Level AAA (2.5.5)'
+        },
+        recommendation: 'Ensure interactive elements are at least 44x44px for touch accessibility',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return findings;
+  }
+
+  // Analyze semantic HTML (WCAG 1.3.1)
+  async analyzeSemanticHTML(document) {
+    const findings = [];
+
+    // Check for landmark regions
+    const hasHeader = document.querySelector('header, [role="banner"]');
+    const hasNav = document.querySelector('nav, [role="navigation"]');
+    const hasMain = document.querySelector('main, [role="main"]');
+    const hasFooter = document.querySelector('footer, [role="contentinfo"]');
+
+    const missingLandmarks = [];
+    if (!hasHeader) missingLandmarks.push('header/banner');
+    if (!hasNav) missingLandmarks.push('nav/navigation');
+    if (!hasMain) missingLandmarks.push('main');
+    if (!hasFooter) missingLandmarks.push('footer/contentinfo');
+
+    if (missingLandmarks.length > 0) {
+      findings.push({
+        type: 'accessibility',
+        category: 'missing_landmarks',
+        severity: 'medium',
+        title: 'Missing Semantic Landmarks',
+        description: 'Page lacks semantic HTML5 landmarks',
+        evidence: {
+          missingLandmarks: missingLandmarks,
+          standard: 'WCAG 2.1 Level A (1.3.1)',
+          note: 'Landmarks help screen reader users navigate'
+        },
+        recommendation: 'Add semantic HTML5 elements or ARIA landmark roles',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // PERFORMANCE FIX P1-2a: Check for excessive div/span usage (count all, not just visible)
+    const divs = Array.from(document.querySelectorAll('div'));
+    const spans = Array.from(document.querySelectorAll('span'));
+    const semanticElements = Array.from(document.querySelectorAll(this.semanticElements.join(',')));
+
+    const divSpanCount = divs.length + spans.length;
+    const semanticCount = semanticElements.length;
+
+    if (divSpanCount > semanticCount * 5 && semanticCount > 0) {
+      findings.push({
+        type: 'accessibility',
+        category: 'excessive_divs',
+        severity: 'low',
+        title: 'Excessive Non-Semantic Elements',
+        description: 'Page heavily relies on <div> and <span> instead of semantic HTML',
+        evidence: {
+          divCount: divs.length,
+          spanCount: spans.length,
+          semanticCount: semanticCount,
+          ratio: (divSpanCount / semanticCount).toFixed(1)
+        },
+        recommendation: 'Use semantic HTML5 elements when possible',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return findings;
+  }
+
+  // Helper: Get element's effective background color
+  getBackgroundColor(element) {
+    let current = element;
+
+    while (current && current !== document.body) {
+      const style = window.getComputedStyle(current);
+      const bgColor = style.backgroundColor;
+
+      // Check if background is not transparent
+      if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
+        return bgColor;
+      }
+
+      current = current.parentElement;
+    }
+
+    // Default to white
+    return 'rgb(255, 255, 255)';
+  }
+
+  // Helper: Calculate color contrast ratio
+  calculateContrast(color1, color2) {
+    const lum1 = this.calculateLuminance(color1);
+    const lum2 = this.calculateLuminance(color2);
+
+    const lighter = Math.max(lum1, lum2);
+    const darker = Math.min(lum1, lum2);
+
+    return (lighter + 0.05) / (darker + 0.05);
+  }
+
+  // Helper: Calculate relative luminance
+  calculateLuminance(color) {
+    const rgb = this.parseColor(color);
+    if (!rgb) return 0;
+
+    const rsRGB = rgb.r / 255;
+    const gsRGB = rgb.g / 255;
+    const bsRGB = rgb.b / 255;
+
+    const R = rsRGB <= 0.03928 ? rsRGB / 12.92 : Math.pow((rsRGB + 0.055) / 1.055, 2.4);
+    const G = gsRGB <= 0.03928 ? gsRGB / 12.92 : Math.pow((gsRGB + 0.055) / 1.055, 2.4);
+    const B = bsRGB <= 0.03928 ? bsRGB / 12.92 : Math.pow((bsRGB + 0.055) / 1.055, 2.4);
+
+    return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+  }
+
+  // Helper: Parse color string to RGB
+  parseColor(color) {
+    const rgbMatch = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+    if (rgbMatch) {
+      return { r: parseInt(rgbMatch[1]), g: parseInt(rgbMatch[2]), b: parseInt(rgbMatch[3]) };
+    }
+
+    const rgbaMatch = color.match(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*[\d.]+\)/);
+    if (rgbaMatch) {
+      return { r: parseInt(rgbaMatch[1]), g: parseInt(rgbaMatch[2]), b: parseInt(rgbaMatch[3]) };
+    }
+
+    return null;
+  }
+
+  // Helper: Check if input has accessible label
+  hasAccessibleLabel(input) {
+    // Check for associated label
+    if (input.id) {
+      const label = document.querySelector(`label[for="${input.id}"]`);
+      if (label) return true;
+    }
+
+    // Check for parent label
+    const parentLabel = input.closest('label');
+    if (parentLabel) return true;
+
+    // Check for aria-label
+    if (input.getAttribute('aria-label')) return true;
+
+    // Check for aria-labelledby
+    if (input.getAttribute('aria-labelledby')) return true;
+
+    // Check for title attribute (not ideal but acceptable)
+    if (input.getAttribute('title')) return true;
+
+    return false;
+  }
+
+  // Helper: Get element location
+  getElementLocation(element) {
+    const rect = element.getBoundingClientRect();
+    return {
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
+    };
+  }
+}
+
+// CRITICAL FIX P0-1: Assign to window instead of ES6 export
+window.accessibilityAnalyzer = new AccessibilityAnalyzer();
+console.log('Hera: Accessibility analyzer loaded (no dynamic import needed)');
