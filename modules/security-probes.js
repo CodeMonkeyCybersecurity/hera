@@ -4,15 +4,18 @@
  * Active security testing functions for JWT vulnerabilities and HTTP repeater functionality.
  *
  * SECURITY CRITICAL: These functions perform active probes/attacks against web applications.
+ * - P0 FIX: User consent required before any probe
  * - SSRF protection is enforced via validateProbeRequest
  * - Rate limiting prevents abuse
  * - Dangerous headers are sanitized
  * - Only same-origin probes allowed
+ * - All probe executions are logged for forensics
  *
  * @module security-probes
  */
 
 import { validateProbeRequest } from './url-utils.js';
+import { probeConsentManager } from './probe-consent.js';
 
 /**
  * Rate limiter for probes to prevent abuse
@@ -121,6 +124,18 @@ export function sanitizeProbeHeaders(headers) {
  * @returns {Promise<{success: boolean, status?: number, statusText?: string, error?: string}>}
  */
 export async function performAlgNoneProbe(originalRequest, jwt, sender) {
+  // P0 FIX: Check user consent FIRST before any probe
+  const targetDomain = new URL(originalRequest.url).hostname;
+  const hasConsent = await probeConsentManager.hasConsent('alg_none', targetDomain);
+
+  if (!hasConsent) {
+    return {
+      success: false,
+      error: 'User consent required. This probe performs an ACTIVE ATTACK and may be illegal. You must explicitly grant consent in the extension settings.',
+      requiresConsent: true
+    };
+  }
+
   // SSRF Protection: Validate request is safe
   const validation = validateProbeRequest(originalRequest.url, sender?.tab?.url);
   if (!validation.valid) {
@@ -176,11 +191,21 @@ export async function performAlgNoneProbe(originalRequest, jwt, sender) {
       body: method !== 'GET' && method !== 'HEAD' ? originalRequest.requestBody : undefined,
     });
 
-    return { success: response.ok, status: response.status, statusText: response.statusText };
+    const result = { success: response.ok, status: response.status, statusText: response.statusText };
+
+    // P0 FIX: Log probe execution for forensics and legal defense
+    await probeConsentManager.logProbeExecution('alg_none', originalRequest.url, result);
+
+    return result;
 
   } catch (error) {
     console.error('Hera Probe Error:', error);
-    return { success: false, error: error.message };
+    const result = { success: false, error: error.message };
+
+    // Log failed probe attempts too
+    await probeConsentManager.logProbeExecution('alg_none', originalRequest.url, result);
+
+    return result;
   }
 }
 
@@ -214,6 +239,18 @@ export async function performRepeaterRequest(rawRequest, sender) {
     const requestLine = lines[0].split(' ');
     const method = requestLine[0]?.toUpperCase();
     const url = requestLine[1];
+
+    // P0 FIX: Check user consent FIRST before any probe
+    const targetDomain = new URL(url).hostname;
+    const hasConsent = await probeConsentManager.hasConsent('repeater', targetDomain);
+
+    if (!hasConsent) {
+      return {
+        success: false,
+        error: 'User consent required. HTTP Repeater allows arbitrary request modification and may be illegal. You must explicitly grant consent in the extension settings.',
+        requiresConsent: true
+      };
+    }
 
     // SSRF Protection: Validate request is safe
     const validation = validateProbeRequest(url, sender?.tab?.url);
@@ -272,10 +309,28 @@ export async function performRepeaterRequest(rawRequest, sender) {
     rawResponse += '\n';
     rawResponse += await response.text();
 
-    return { rawResponse: rawResponse };
+    const result = { rawResponse: rawResponse, success: response.ok, status: response.status };
+
+    // P0 FIX: Log probe execution for forensics
+    const lines = rawRequest.split('\n');
+    const url = lines[0].split(' ')[1];
+    await probeConsentManager.logProbeExecution('repeater', url, result);
+
+    return result;
 
   } catch (error) {
     console.error('Hera Repeater Error:', error);
-    return { error: error.message };
+    const result = { error: error.message, success: false };
+
+    // Log failed attempts too
+    try {
+      const lines = rawRequest.split('\n');
+      const url = lines[0].split(' ')[1];
+      await probeConsentManager.logProbeExecution('repeater', url, result);
+    } catch (logError) {
+      console.error('Failed to log repeater execution:', logError);
+    }
+
+    return result;
   }
 }

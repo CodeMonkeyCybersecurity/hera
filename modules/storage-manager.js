@@ -1,22 +1,48 @@
 // Storage Manager - Centralized storage operations with quota management
+// P0 SECURITY FIX: Now includes encryption, secret redaction, and mutex locking
+
+import { securelyStoreSession, retrieveSecureSession } from './secure-storage.js';
 
 export class StorageManager {
   constructor() {
     this.QUOTA_WARNING_THRESHOLD = 0.8; // 80% of quota
     this.MAX_SESSIONS = 1000; // Hard limit on stored sessions
+    this.SESSION_RETENTION_HOURS = 24; // P0 FIX: Auto-delete sessions after 24 hours
+
+    // P0 FIX: Mutex for preventing race conditions
+    this.storageLock = Promise.resolve();
   }
 
   // Store authentication event
+  // P0 FIX: Now uses mutex, encryption, redaction, and auto-cleanup
   async storeAuthEvent(eventData) {
-    try {
-      const result = await chrome.storage.local.get({ heraSessions: [] });
-      const sessions = result.heraSessions;
-      sessions.push(eventData);
-      await chrome.storage.local.set({ heraSessions: sessions });
-      await this.updateBadge();
-    } catch (error) {
-      console.error('Failed to store auth event:', error);
-    }
+    // Acquire lock to prevent race conditions
+    this.storageLock = this.storageLock.then(async () => {
+      try {
+        const result = await chrome.storage.local.get({ heraSessions: [] });
+        let sessions = result.heraSessions;
+
+        // P0 FIX: Clean up old sessions (retention policy)
+        sessions = await this.cleanupOldSessions(sessions);
+
+        // P0 FIX: Redact secrets and encrypt
+        const secureData = await securelyStoreSession(eventData);
+
+        sessions.push(secureData);
+
+        // Enforce max sessions limit
+        if (sessions.length > this.MAX_SESSIONS) {
+          sessions = sessions.slice(-this.MAX_SESSIONS);
+        }
+
+        await chrome.storage.local.set({ heraSessions: sessions });
+        await this.updateBadge();
+      } catch (error) {
+        console.error('Failed to store auth event:', error);
+      }
+    });
+
+    return this.storageLock;
   }
 
   // Store session data
@@ -32,14 +58,53 @@ export class StorageManager {
   }
 
   // Get all sessions
+  // P0 FIX: Now decrypts sessions
   async getAllSessions() {
     try {
       const result = await chrome.storage.local.get({ heraSessions: [] });
-      return result.heraSessions || [];
+      const encryptedSessions = result.heraSessions || [];
+
+      // Decrypt all sessions
+      const decryptedSessions = await Promise.all(
+        encryptedSessions.map(session => retrieveSecureSession(session))
+      );
+
+      return decryptedSessions.filter(s => s !== null);
     } catch (error) {
       console.error('Failed to get sessions:', error);
       return [];
     }
+  }
+
+  // P0 FIX: Clean up sessions older than retention period
+  async cleanupOldSessions(sessions) {
+    const now = Date.now();
+    const retentionMs = this.SESSION_RETENTION_HOURS * 60 * 60 * 1000;
+
+    // Decrypt to check timestamps
+    const decryptedSessions = await Promise.all(
+      sessions.map(async (session) => {
+        const decrypted = await retrieveSecureSession(session);
+        return { original: session, decrypted };
+      })
+    );
+
+    // Filter out old sessions
+    const filtered = decryptedSessions.filter(({ decrypted }) => {
+      if (!decrypted || !decrypted.timestamp) return true; // Keep if no timestamp
+
+      const sessionTime = new Date(decrypted.timestamp).getTime();
+      const age = now - sessionTime;
+
+      return age < retentionMs;
+    });
+
+    const removedCount = sessions.length - filtered.length;
+    if (removedCount > 0) {
+      console.log(`Hera: Auto-deleted ${removedCount} sessions older than ${this.SESSION_RETENTION_HOURS}h`);
+    }
+
+    return filtered.map(({ original }) => original);
   }
 
   // Clear all sessions

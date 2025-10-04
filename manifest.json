@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Hera by Code Monkey Cybersecurity",
   "version": "1.0",
-  "description": "All-in-one security extension: detects phishing, dark patterns, privacy violations, and accessibility issues. Also inspects OAuth/OIDC/SAML flows. Uses ipapi.co for IP geolocation (see privacy policy).",
+  "description": "Security testing extension: detects phishing, dark patterns, privacy violations. Inspects OAuth/OIDC/SAML flows. Includes active security probes (requires consent). Uses Cloudflare DNS and IP geolocation APIs.",
   "permissions": [
     "storage",
     "downloads",
@@ -66,7 +66,7 @@
     "128": "icons/icon128.png"
   },
   "content_security_policy": {
-    "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://ip-api.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';"
+    "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://cloudflare-dns.com https://ipapi.co https://ip-api.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';"
   },
   "devtools_page": "devtools/devtools.html"
 }

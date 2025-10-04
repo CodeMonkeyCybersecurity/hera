@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hera - Security Probe Consent</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      padding: 20px;
+      max-width: 700px;
+      margin: 0 auto;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #dc3545;
+      font-size: 24px;
+      margin-bottom: 10px;
+    }
+    .warning {
+      background: #fff3cd;
+      border-left: 4px solid #ff6b6b;
+      padding: 15px;
+      margin: 20px 0;
+      border-radius: 4px;
+    }
+    .warning h2 {
+      color: #721c24;
+      font-size: 18px;
+      margin-top: 0;
+    }
+    .risks {
+      background: #f8d7da;
+      padding: 15px;
+      margin: 20px 0;
+      border-radius: 4px;
+      border-left: 4px solid #dc3545;
+    }
+    .risks h3 {
+      color: #721c24;
+      margin-top: 0;
+    }
+    .risks ul {
+      margin: 10px 0;
+      padding-left: 20px;
+    }
+    .risks li {
+      margin: 5px 0;
+      color: #721c24;
+    }
+    .consent-form {
+      margin: 30px 0;
+    }
+    .form-group {
+      margin: 20px 0;
+    }
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: #333;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 10px;
+      border: 2px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    input[type="text"]:focus {
+      outline: none;
+      border-color: #007bff;
+    }
+    .checkbox-group {
+      margin: 15px 0;
+    }
+    .checkbox-group label {
+      display: flex;
+      align-items: start;
+      font-weight: normal;
+      cursor: pointer;
+    }
+    .checkbox-group input[type="checkbox"] {
+      margin-right: 10px;
+      margin-top: 4px;
+      flex-shrink: 0;
+    }
+    .button-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 30px;
+    }
+    button {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 4px;
+      font-size: 16px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-danger {
+      background: #dc3545;
+      color: white;
+    }
+    .btn-danger:hover:not(:disabled) {
+      background: #c82333;
+    }
+    .btn-secondary {
+      background: #6c757d;
+      color: white;
+    }
+    .btn-secondary:hover {
+      background: #5a6268;
+    }
+    .probe-log {
+      margin-top: 30px;
+      border-top: 1px solid #ddd;
+      padding-top: 20px;
+    }
+    .probe-log h3 {
+      font-size: 18px;
+      margin-bottom: 15px;
+    }
+    .log-entry {
+      background: #f8f9fa;
+      padding: 10px;
+      margin: 5px 0;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    .success { color: #28a745; }
+    .error { color: #dc3545; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>⚠️ Security Probe Consent Required</h1>
+
+    <div class="warning">
+      <h2>⚡ ACTIVE ATTACK TOOLS - READ CAREFULLY</h2>
+      <p><strong>This extension includes tools that perform ACTIVE ATTACKS against web servers.</strong></p>
+      <p>These are NOT passive security checks. These tools ACTIVELY attempt to exploit vulnerabilities.</p>
+    </div>
+
+    <div class="risks">
+      <h3>🚨 LEGAL AND TECHNICAL RISKS</h3>
+      <ul>
+        <li><strong>LEGAL:</strong> Unauthorized security testing may violate computer fraud laws (e.g., CFAA in USA, Computer Misuse Act in UK)</li>
+        <li><strong>EMPLOYMENT:</strong> Using these tools on corporate networks may result in termination</li>
+        <li><strong>CRIMINAL:</strong> Attacking systems without permission may result in prosecution</li>
+        <li><strong>CIVIL:</strong> You may be sued for damages caused by your testing</li>
+        <li><strong>DETECTION:</strong> Security systems (IDS/IPS/WAF) will likely detect and log your IP address</li>
+        <li><strong>LIABILITY:</strong> You are solely responsible for any probes you execute</li>
+      </ul>
+    </div>
+
+    <div class="warning">
+      <h2>✅ When is it LEGAL to use these tools?</h2>
+      <ul>
+        <li>Testing your own applications and servers</li>
+        <li>Bug bounty programs with explicit authorization</li>
+        <li>Security assessments with written permission from the system owner</li>
+        <li>Penetration testing contracts with proper scope documents</li>
+      </ul>
+      <p><strong>If you don't have explicit written permission, DO NOT USE THESE TOOLS.</strong></p>
+    </div>
+
+    <form id="consentForm" class="consent-form">
+      <div class="form-group">
+        <label for="acknowledgment">
+          Type exactly: <strong>"I understand the risks"</strong>
+        </label>
+        <input type="text" id="acknowledgment" placeholder="Type here..." autocomplete="off" required>
+      </div>
+
+      <div class="checkbox-group">
+        <label>
+          <input type="checkbox" id="legalCheck" required>
+          I have legal authorization to test the target systems
+        </label>
+      </div>
+
+      <div class="checkbox-group">
+        <label>
+          <input type="checkbox" id="responsibilityCheck" required>
+          I accept sole responsibility for any probes I execute
+        </label>
+      </div>
+
+      <div class="checkbox-group">
+        <label>
+          <input type="checkbox" id="loggingCheck" required>
+          I understand all probe attempts are logged for forensic purposes
+        </label>
+      </div>
+
+      <div class="checkbox-group">
+        <label>
+          <input type="checkbox" id="expiryCheck" required>
+          I understand this consent expires in 24 hours and must be renewed
+        </label>
+      </div>
+
+      <div class="button-group">
+        <button type="submit" class="btn-danger" id="grantBtn" disabled>
+          ⚡ I Accept the Risks - Enable Probes
+        </button>
+        <button type="button" class="btn-secondary" id="cancelBtn">
+          Cancel
+        </button>
+      </div>
+    </form>
+
+    <div class="probe-log">
+      <h3>📋 Recent Probe History</h3>
+      <div id="probeHistory"></div>
+      <button type="button" class="btn-secondary" id="clearHistoryBtn" style="margin-top: 10px;">
+        Clear History
+      </button>
+    </div>
+  </div>
+
+  <script src="probe-consent.js" type="module"></script>
+</body>
+</html>
