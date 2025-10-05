@@ -9,24 +9,110 @@ export class StorageManager {
     this.MAX_SESSIONS = 1000; // Hard limit on stored sessions
     this.SESSION_RETENTION_HOURS = 24; // P0 FIX: Auto-delete sessions after 24 hours
 
+    // P0-TENTH-2 FIX: Per-origin limits
+    this.MAX_SESSIONS_PER_ORIGIN = 50; // Max 50 sessions per domain
+    this.STORAGE_RATE_LIMIT = 10; // Max 10 stores per minute per origin
+    this.originStorageCount = new Map(); // Track stores per origin
+    this.originLastReset = new Map(); // Track rate limit windows
+
     // P0 FIX: Mutex for preventing race conditions
     this.storageLock = Promise.resolve();
   }
 
+  // P0-TENTH-2 FIX: Check per-origin rate limit
+  _checkOriginRateLimit(origin) {
+    const now = Date.now();
+    const lastReset = this.originLastReset.get(origin) || 0;
+
+    // Reset counter every minute
+    if (now - lastReset > 60000) {
+      this.originStorageCount.set(origin, 0);
+      this.originLastReset.set(origin, now);
+    }
+
+    const count = this.originStorageCount.get(origin) || 0;
+
+    if (count >= this.STORAGE_RATE_LIMIT) {
+      console.warn(`Hera SECURITY: Storage rate limit exceeded for ${origin} (${count}/${this.STORAGE_RATE_LIMIT})`);
+      return false;
+    }
+
+    this.originStorageCount.set(origin, count + 1);
+    return true;
+  }
+
   // Store authentication event
   // P0 FIX: Now uses mutex, encryption, redaction, and auto-cleanup
+  // P0-ARCH-1 FIX: Fast atomic cleanup without slow decryption
   async storeAuthEvent(eventData) {
-    // Acquire lock to prevent race conditions
+    // P0-NINTH-2 FIX: Proper mutex - wrap the entire async operation
     this.storageLock = this.storageLock.then(async () => {
       try {
+        // P0-TENTH-2 FIX: Extract origin from URL
+        let origin;
+        try {
+          origin = new URL(eventData.url).origin;
+        } catch (e) {
+          console.error('Invalid URL in auth event:', eventData.url);
+          return; // Reject invalid URLs
+        }
+
+        // P0-TENTH-2 FIX: Check rate limit
+        if (!this._checkOriginRateLimit(origin)) {
+          throw new Error(`Storage rate limit exceeded for origin: ${origin}`);
+        }
+
         const result = await chrome.storage.local.get({ heraSessions: [] });
         let sessions = result.heraSessions;
 
-        // P0 FIX: Clean up old sessions (retention policy)
-        sessions = await this.cleanupOldSessions(sessions);
+        // P0-TENTH-2 FIX: Count sessions per origin
+        const originSessions = sessions.filter(s => {
+          try {
+            return new URL(s.url).origin === origin;
+          } catch (e) {
+            return false;
+          }
+        });
+
+        if (originSessions.length >= this.MAX_SESSIONS_PER_ORIGIN) {
+          console.warn(`Hera SECURITY: Origin ${origin} exceeded session limit (${originSessions.length}/${this.MAX_SESSIONS_PER_ORIGIN})`);
+
+          // Remove oldest session from this origin
+          const oldestIndex = sessions.findIndex(s => {
+            try {
+              return new URL(s.url).origin === origin;
+            } catch (e) {
+              return false;
+            }
+          });
+
+          if (oldestIndex !== -1) {
+            sessions.splice(oldestIndex, 1);
+            console.log(`Evicted oldest session from ${origin}`);
+          }
+        }
+
+        // P0-ARCH-1 FIX: Fast timestamp-based cleanup (no decryption needed)
+        const now = Date.now();
+        const retentionMs = this.SESSION_RETENTION_HOURS * 60 * 60 * 1000;
+
+        sessions = sessions.filter(session => {
+          // Use external timestamp (plaintext) for fast filtering
+          const ts = session._timestamp || 0;
+          if (ts === 0) return true; // Keep sessions without timestamp
+          return (now - ts) < retentionMs;
+        });
+
+        const deletedCount = result.heraSessions.length - sessions.length;
+        if (deletedCount > 0) {
+          console.log(`Hera: Auto-deleted ${deletedCount} sessions older than ${this.SESSION_RETENTION_HOURS}h`);
+        }
 
         // P0 FIX: Redact secrets and encrypt
         const secureData = await securelyStoreSession(eventData);
+
+        // P0-ARCH-1: Store plaintext timestamp for fast cleanup
+        secureData._timestamp = new Date(eventData.timestamp).getTime();
 
         sessions.push(secureData);
 
@@ -39,10 +125,14 @@ export class StorageManager {
         await this.updateBadge();
       } catch (error) {
         console.error('Failed to store auth event:', error);
+        // P0-NINTH-2 FIX: Re-throw to ensure caller knows operation failed
+        throw error;
       }
     });
 
-    return this.storageLock;
+    // P0-NINTH-2 FIX: Await the lock to ensure operation completes before returning
+    await this.storageLock;
+    return;
   }
 
   // Store session data
@@ -76,27 +166,21 @@ export class StorageManager {
     }
   }
 
-  // P0 FIX: Clean up sessions older than retention period
+  // P0-ARCH-1 FIX: DEPRECATED - This method is no longer used
+  // The fast timestamp-based cleanup is now done directly in storeAuthEvent()
+  // using external _timestamp field (no decryption required)
+  //
+  // This method is kept for backwards compatibility in case it's called from
+  // external code, but it now uses the fast path.
   async cleanupOldSessions(sessions) {
     const now = Date.now();
     const retentionMs = this.SESSION_RETENTION_HOURS * 60 * 60 * 1000;
 
-    // Decrypt to check timestamps
-    const decryptedSessions = await Promise.all(
-      sessions.map(async (session) => {
-        const decrypted = await retrieveSecureSession(session);
-        return { original: session, decrypted };
-      })
-    );
-
-    // Filter out old sessions
-    const filtered = decryptedSessions.filter(({ decrypted }) => {
-      if (!decrypted || !decrypted.timestamp) return true; // Keep if no timestamp
-
-      const sessionTime = new Date(decrypted.timestamp).getTime();
-      const age = now - sessionTime;
-
-      return age < retentionMs;
+    // P0-ARCH-1 FIX: Use external timestamp for fast filtering (no decryption)
+    const filtered = sessions.filter(session => {
+      const ts = session._timestamp || 0;
+      if (ts === 0) return true; // Keep sessions without timestamp
+      return (now - ts) < retentionMs;
     });
 
     const removedCount = sessions.length - filtered.length;
@@ -104,7 +188,7 @@ export class StorageManager {
       console.log(`Hera: Auto-deleted ${removedCount} sessions older than ${this.SESSION_RETENTION_HOURS}h`);
     }
 
-    return filtered.map(({ original }) => original);
+    return filtered;
   }
 
   // Clear all sessions

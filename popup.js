@@ -1,3 +1,21 @@
+// P1-NINTH-4 FIX: Validate extension context to prevent clickjacking
+(function() {
+  'use strict';
+
+  // Detect if popup.html was opened in invalid context (not via extension icon)
+  if (window.opener || window.location !== window.parent.location) {
+    // Opened by another window or iframed (shouldn't be possible but check anyway)
+    document.body.innerHTML = `
+      <div style="padding: 20px; text-align: center; font-family: system-ui, -apple-system, sans-serif;">
+        <h1>⚠️ Invalid Context</h1>
+        <p>This page must be opened via the extension icon.</p>
+        <p>Please close this window and click the Hera icon in your browser toolbar.</p>
+      </div>
+    `;
+    throw new Error('Popup opened in invalid context');
+  }
+})();
+
 // Security utilities for safe DOM manipulation and JWT processing
 const DOMSecurity = {
   // Safe HTML sanitization
@@ -1410,30 +1428,84 @@ By: Hera Security Extension
       if (ipAddresses.ipv4Addresses && ipAddresses.ipv4Addresses.length > 0) {
         const ipSection = document.createElement('div');
         ipSection.className = 'ip-section';
-        ipSection.innerHTML = `
-          <h4>IP Addresses & Locations</h4>
-          ${ipAddresses.ipv4Addresses.map(ip => {
-            const geoData = ipAddresses.geoLocations?.find(geo => geo.ip === ip);
-            return `
-              <div class="ip-item">
-                <div class="ip-address">${ip}</div>
-                ${geoData ? `
-                  <div class="ip-details">
-                    <span class="ip-location">${geoData.city || 'Unknown'}, ${geoData.country || 'Unknown'}</span>
-                    <span class="ip-isp">${geoData.isp || 'Unknown ISP'}</span>
-                    ${geoData.isVPN ? '<span class="ip-warning">VPN Detected</span>' : ''}
-                    ${geoData.isTor ? '<span class="ip-warning">Tor Network</span>' : ''}
-                    ${geoData.isProxy ? '<span class="ip-warning">Proxy Detected</span>' : ''}
-                    ${geoData.threatLevel === 'high' ? '<span class="ip-threat">High Threat</span>' : ''}
-                  </div>
-                ` : '<div class="ip-details">Location data unavailable</div>'}
-              </div>
-            `;
-          }).join('')}
-        `;
+
+        // P0-NEW-1 FIX: Use DOM methods instead of innerHTML to prevent XSS
+        const title = document.createElement('h4');
+        title.textContent = 'IP Addresses & Locations';
+        ipSection.appendChild(title);
+
+        ipAddresses.ipv4Addresses.forEach(ip => {
+          const geoData = ipAddresses.geoLocations?.find(geo => geo.ip === ip);
+
+          const ipItem = document.createElement('div');
+          ipItem.className = 'ip-item';
+
+          const ipAddress = document.createElement('div');
+          ipAddress.className = 'ip-address';
+          ipAddress.textContent = ip; // Safe - textContent auto-escapes
+          ipItem.appendChild(ipAddress);
+
+          if (geoData) {
+            const ipDetails = document.createElement('div');
+            ipDetails.className = 'ip-details';
+
+            const location = document.createElement('span');
+            location.className = 'ip-location';
+            // P0-NEW-1: Sanitize untrusted data from IPapi.co
+            location.textContent = `${geoData.city || 'Unknown'}, ${geoData.country || 'Unknown'}`;
+            ipDetails.appendChild(location);
+
+            const isp = document.createElement('span');
+            isp.className = 'ip-isp';
+            isp.textContent = geoData.isp || 'Unknown ISP'; // Safe
+            ipDetails.appendChild(isp);
+
+            if (geoData.isVPN) {
+              const vpn = document.createElement('span');
+              vpn.className = 'ip-warning';
+              vpn.textContent = 'VPN Detected';
+              ipDetails.appendChild(vpn);
+            }
+
+            if (geoData.isTor) {
+              const tor = document.createElement('span');
+              tor.className = 'ip-warning';
+              tor.textContent = 'Tor Network';
+              ipDetails.appendChild(tor);
+            }
+
+            if (geoData.isProxy) {
+              const proxy = document.createElement('span');
+              proxy.className = 'ip-warning';
+              proxy.textContent = 'Proxy Detected';
+              ipDetails.appendChild(proxy);
+            }
+
+            if (geoData.threatLevel === 'high') {
+              const threat = document.createElement('span');
+              threat.className = 'ip-threat';
+              threat.textContent = 'High Threat';
+              ipDetails.appendChild(threat);
+            }
+
+            ipItem.appendChild(ipDetails);
+          } else {
+            const noData = document.createElement('div');
+            noData.className = 'ip-details';
+            noData.textContent = 'Location data unavailable';
+            ipItem.appendChild(noData);
+          }
+
+          ipSection.appendChild(ipItem);
+        });
+
         ipContainer.appendChild(ipSection);
       } else {
-        ipContainer.innerHTML = '<div class="ip-section">No IP address data available</div>';
+        const noData = document.createElement('div');
+        noData.className = 'ip-section';
+        noData.textContent = 'No IP address data available';
+        ipContainer.innerHTML = ''; // Clear first
+        ipContainer.appendChild(noData);
       }
     }
     
@@ -2915,7 +2987,13 @@ By: Hera Security Extension
     // Display IP addresses if available
     if (ipAddressesEl) {
       if (dnsIntel?.ipAddresses && dnsIntel.ipAddresses.length > 0) {
+        // P0-SIXTH-2 FIX: Add warning about DNS data trustworthiness
         ipAddressesEl.innerHTML = `
+          <div class="security-warning" style="background: #fff3cd; border: 1px solid #ffc107; padding: 8px; margin-bottom: 10px; border-radius: 4px; font-size: 0.9em;">
+            <strong>⚠️ Trust Warning:</strong> DNS and geolocation data is from third-party APIs (Cloudflare DNS, IPapi.co).
+            If your network uses a proxy or has been compromised, this data may be inaccurate. Do not rely solely on
+            this information for security decisions.
+          </div>
           <h4>IP Addresses</h4>
           ${dnsIntel.ipAddresses.map(ip => `
             <div class="ip-address">

@@ -8,6 +8,7 @@ export class IPCacheManager {
     this.initialized = false;
     this.initPromise = this.initialize();
     this.CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+    this.MAX_CACHE_SIZE = 1000; // P2-ARCH-2 FIX: Maximum cached IPs
   }
 
   async initialize() {
@@ -73,6 +74,25 @@ export class IPCacheManager {
 
   // Methods to trigger sync after modifications
   setCacheEntry(ip, data) {
+    // P2-ARCH-2 FIX: Enforce max cache size (LRU eviction)
+    if (this._ipCache.size >= this.MAX_CACHE_SIZE && !this._ipCache.has(ip)) {
+      // Find oldest entry to evict
+      let oldestIP = null;
+      let oldestTime = Infinity;
+
+      for (const [cachedIP, entry] of this._ipCache.entries()) {
+        if (entry.timestamp < oldestTime) {
+          oldestTime = entry.timestamp;
+          oldestIP = cachedIP;
+        }
+      }
+
+      if (oldestIP) {
+        this._ipCache.delete(oldestIP);
+        console.log(`Hera: IP cache full, evicted oldest entry: ${oldestIP}`);
+      }
+    }
+
     this._ipCache.set(ip, {
       ...data,
       timestamp: Date.now()

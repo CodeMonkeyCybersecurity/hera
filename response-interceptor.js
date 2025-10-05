@@ -40,6 +40,13 @@
   }, RATE_LIMIT_WINDOW);
 
   // Check if domain is rate limited
+  // TODO P2-TENTH-1: Rate limit uses hostname, allowing subdomain bypass
+  // Attacker can use api1.evil.com, api2.evil.com to get 50x limit
+  // Should use base domain instead. See TENTH-REVIEW-FINDINGS.md:1971
+  //
+  // TODO P2-TENTH-2: domainInterceptCounts Map grows unbounded (memory leak)
+  // No max size limit, can grow to thousands of entries
+  // Should add max 500 entries with LRU eviction. See TENTH-REVIEW-FINDINGS.md:2025
   function checkRateLimit(url) {
     try {
       const hostname = new URL(url, window.location.href).hostname;

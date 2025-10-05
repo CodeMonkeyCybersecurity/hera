@@ -15,6 +15,10 @@ class AlertManager {
     this._alertHistory = new Map();
     this.initialized = false;
     this.initPromise = this.initialize();
+
+    // P0-SEVENTH-1 FIX: Maximum alert history size to prevent storage quota exhaustion
+    this.MAX_ALERT_HISTORY_SIZE = 1000;
+    this.ALERT_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
   }
 
   async initialize() {
@@ -252,19 +256,38 @@ class AlertManager {
 
   /**
    * Clear old alert history (run periodically)
+   * P0-SEVENTH-1 FIX: Added LRU eviction to prevent unbounded growth
    */
   cleanupAlertHistory() {
-    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const now = Date.now();
     let cleaned = 0;
+
+    // 1. Remove expired entries (older than 24 hours)
     for (const [key, timestamp] of this.alertHistory.entries()) {
-      if (timestamp < oneHourAgo) {
+      if (now - timestamp > this.ALERT_EXPIRY_MS) {
         this.alertHistory.delete(key);
         cleaned++;
       }
     }
 
+    // 2. P0-SEVENTH-1 FIX: If still too large, LRU eviction
+    if (this.alertHistory.size > this.MAX_ALERT_HISTORY_SIZE) {
+      // Sort by timestamp (oldest first)
+      const entries = Array.from(this.alertHistory.entries())
+        .sort((a, b) => a[1] - b[1]);
+
+      // Remove oldest entries until size is acceptable
+      const toRemove = this.alertHistory.size - this.MAX_ALERT_HISTORY_SIZE;
+      for (let i = 0; i < toRemove; i++) {
+        this.alertHistory.delete(entries[i][0]);
+        cleaned++;
+      }
+
+      console.log(`Hera: Alert history LRU eviction removed ${toRemove} oldest entries`);
+    }
+
     if (cleaned > 0) {
-      console.log(`Hera: Cleaned ${cleaned} old alert history entries`);
+      console.log(`Hera: Cleaned ${cleaned} total alert history entries (size now: ${this.alertHistory.size}/${this.MAX_ALERT_HISTORY_SIZE})`);
       // CRITICAL FIX: Persist deletion to storage.session
       this._debouncedSync();
     }

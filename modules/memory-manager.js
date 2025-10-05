@@ -6,9 +6,14 @@ export class MemoryManager {
   constructor() {
     this.REQUEST_TTL = 5 * 60 * 1000; // 5 minutes
 
+    // P0-TENTH-3 FIX: Hard limits on in-memory requests
+    this.MAX_IN_MEMORY_REQUESTS = 1000; // Hard cap
+    this.MAX_REQUESTS_PER_ORIGIN = 50; // Per-origin limit
+
     // In-memory caches (fast synchronous access)
     this._authRequestsCache = new Map();
     this._debugTargetsCache = new Map();
+    this._originRequestCount = new Map(); // P0-TENTH-3 FIX: Track per-origin counts
 
     // Track pending writes to avoid race conditions
     this._pendingWrites = new Set();
@@ -96,13 +101,28 @@ export class MemoryManager {
   }
 
   // Estimate storage size
+  // P2-ARCH-1 FIX: Incremental size calculation to avoid memory spike
   _estimateStorageSize() {
     try {
-      const authRequestsObj = Object.fromEntries(this._authRequestsCache.entries());
-      const debugTargetsObj = Object.fromEntries(this._debugTargetsCache.entries());
-      const combined = { authRequests: authRequestsObj, debugTargets: debugTargetsObj };
-      return JSON.stringify(combined).length * 2; // UTF-16 chars = 2 bytes each
+      let totalSize = 0;
+
+      // Estimate authRequests size incrementally (no full JSON.stringify)
+      for (const [key, value] of this._authRequestsCache.entries()) {
+        const keySize = key.length * 2; // UTF-16
+        const valueSize = JSON.stringify(value).length * 2;
+        totalSize += keySize + valueSize + 100; // 100 bytes overhead per entry
+      }
+
+      // Estimate debugTargets size incrementally
+      for (const [key, value] of this._debugTargetsCache.entries()) {
+        const keySize = String(key).length * 2; // UTF-16
+        const valueSize = JSON.stringify(value).length * 2;
+        totalSize += keySize + valueSize + 100; // 100 bytes overhead per entry
+      }
+
+      return totalSize;
     } catch (error) {
+      console.error('Hera: Failed to estimate storage size:', error);
       return 0;
     }
   }
@@ -149,6 +169,10 @@ export class MemoryManager {
     // SECURITY FIX P3-NEW: Reduced debounce from 100ms to 1000ms
     // Reason: onSuspend handler removed (doesn't work in MV3)
     // More aggressive syncing compensates for lack of final sync
+
+    // TODO P1-TENTH-6: 1-second debounce creates data loss window on service worker restart
+    // If worker terminates before timeout fires, all pending writes are lost permanently
+    // Should reduce to 100ms and add retry logic. See TENTH-REVIEW-FINDINGS.md:1739
     if (this._syncTimeout) clearTimeout(this._syncTimeout);
     this._syncTimeout = setTimeout(() => {
       this._syncToStorage().catch(err =>
@@ -161,8 +185,57 @@ export class MemoryManager {
 
   async addAuthRequest(requestId, requestData) {
     await this.initPromise;
+
+    // P0-TENTH-3 FIX: Extract origin
+    let origin;
+    try {
+      origin = new URL(requestData.url).origin;
+    } catch (e) {
+      console.error('Invalid URL in auth request:', requestData.url);
+      return false; // Reject invalid
+    }
+
+    // P0-TENTH-3 FIX: Check total limit
+    if (this._authRequestsCache.size >= this.MAX_IN_MEMORY_REQUESTS) {
+      console.warn(`Hera SECURITY: In-memory request limit reached (${this._authRequestsCache.size}/${this.MAX_IN_MEMORY_REQUESTS})`);
+
+      // Force immediate cleanup
+      await this.cleanupStaleRequests();
+
+      // If still over limit, remove oldest entry
+      if (this._authRequestsCache.size >= this.MAX_IN_MEMORY_REQUESTS) {
+        const oldestKey = this._authRequestsCache.keys().next().value;
+        this._authRequestsCache.delete(oldestKey);
+        console.log('Evicted oldest request to make room');
+      }
+    }
+
+    // P0-TENTH-3 FIX: Check per-origin limit
+    const originCount = this._originRequestCount.get(origin) || 0;
+    if (originCount >= this.MAX_REQUESTS_PER_ORIGIN) {
+      console.warn(`Hera SECURITY: Origin ${origin} exceeded request limit (${originCount}/${this.MAX_REQUESTS_PER_ORIGIN})`);
+
+      // Remove oldest request from this origin
+      for (const [id, data] of this._authRequestsCache.entries()) {
+        try {
+          if (new URL(data.url).origin === origin) {
+            this._authRequestsCache.delete(id);
+            this._originRequestCount.set(origin, originCount - 1);
+            console.log(`Evicted oldest request from ${origin}`);
+            break;
+          }
+        } catch (e) {
+          // Skip invalid entries
+        }
+      }
+    }
+
+    // Add to cache
     this._authRequestsCache.set(requestId, requestData);
+    this._originRequestCount.set(origin, (this._originRequestCount.get(origin) || 0) + 1);
+
     this.syncWrite(); // Background sync
+    return true;
   }
 
   async getAuthRequest(requestId) {
@@ -172,6 +245,21 @@ export class MemoryManager {
 
   async deleteAuthRequest(requestId) {
     await this.initPromise;
+
+    // P0-TENTH-3 FIX: Update origin count when deleting
+    const requestData = this._authRequestsCache.get(requestId);
+    if (requestData) {
+      try {
+        const origin = new URL(requestData.url).origin;
+        const count = this._originRequestCount.get(origin) || 0;
+        if (count > 0) {
+          this._originRequestCount.set(origin, count - 1);
+        }
+      } catch (e) {
+        // Ignore invalid URLs
+      }
+    }
+
     const existed = this._authRequestsCache.delete(requestId);
     this.syncWrite(); // Background sync
     return existed;

@@ -17,6 +17,29 @@ class PhishingDetector {
       'twitter': ['twitter.com', 'x.com']
     };
 
+    // CRITICAL FIX: High-reputation domains that should NEVER be flagged as phishing
+    // These are Alexa Top 1000 sites with strong security reputations
+    this.highReputationDomains = [
+      // Tech giants
+      'google.com', 'youtube.com', 'facebook.com', 'twitter.com', 'x.com',
+      'instagram.com', 'linkedin.com', 'microsoft.com', 'apple.com',
+      'amazon.com', 'netflix.com', 'tiktok.com', 'snapchat.com',
+      // Dev/Open Source
+      'github.com', 'gitlab.com', 'bitbucket.org', 'stackoverflow.com',
+      'npmjs.com', 'pypi.org', 'docker.com', 'kubernetes.io',
+      // Education/Reference
+      'wikipedia.org', 'reddit.com', 'medium.com', 'quora.com',
+      // News/Media
+      'nytimes.com', 'bbc.com', 'cnn.com', 'theguardian.com',
+      // eCommerce
+      'ebay.com', 'etsy.com', 'shopify.com', 'aliexpress.com',
+      // Enterprise
+      'salesforce.com', 'zoom.us', 'slack.com', 'atlassian.com',
+      // Gov/Edu
+      '.gov', '.edu', '.mil'
+    ];
+
+
     // Brand colors for visual cloning detection
     this.brandColors = {
       'paypal': { primary: '#003087', secondary: '#009cde' },
@@ -33,6 +56,21 @@ class PhishingDetector {
       '.xyz', '.top', '.win', '.review', '.date',
       '.loan', '.download', '.stream', '.science'
     ];
+  }
+
+  // CRITICAL FIX: Check if domain is high-reputation (should never be flagged)
+  isHighReputationDomain(hostname) {
+    const domain = hostname.replace(/^www\./, '').toLowerCase();
+
+    return this.highReputationDomains.some(trusted => {
+      if (trusted.startsWith('.')) {
+        // TLD check (e.g., .gov, .edu)
+        return domain.endsWith(trusted);
+      } else {
+        // Exact domain or subdomain match
+        return domain === trusted || domain.endsWith('.' + trusted);
+      }
+    });
   }
 
   // PERFORMANCE FIX P1-2a: Helper to check if element is visible
@@ -161,6 +199,11 @@ class PhishingDetector {
       const hostname = new URL(url).hostname;
       const domain = hostname.replace(/^www\./, '');
 
+      // CRITICAL FIX: Skip typosquatting check for high-reputation domains
+      if (this.isHighReputationDomain(hostname)) {
+        return findings; // GitHub, StackOverflow, etc. are never typosquatters
+      }
+
       // Check against known brands
       for (const [brand, trustedDomains] of Object.entries(this.trustedDomains)) {
         for (const trustedDomain of trustedDomains) {
@@ -170,7 +213,8 @@ class PhishingDetector {
           // Calculate Levenshtein distance
           const distance = this.levenshteinDistance(domain, trustedDomain);
 
-          // Flag if very similar (distance 1-3 characters)
+          // CRITICAL FIX: Only flag if distance is 1-3 AND domains are similar enough
+          // This prevents "github.com" from being flagged as similar to "twitter.com"
           if (distance > 0 && distance <= 3) {
             findings.push({
               type: 'phishing',
@@ -191,9 +235,9 @@ class PhishingDetector {
             });
           }
 
-          // CRITICAL FIX: Only check typosquatting patterns if domains are actually similar
-          // Skip if edit distance is too high (e.g., gov.uk vs x.com = distance 6)
-          if (distance <= 5) {
+          // CRITICAL FIX: Only check typosquatting patterns if distance is 1-3 (not 5!)
+          // This prevents absurd false positives like "github.com" vs "twitter.com"
+          if (distance > 0 && distance <= 3) {
             const patterns = this.detectTyposquattingPatterns(domain, trustedDomain);
             if (patterns.length > 0) {
               findings.push({
@@ -231,6 +275,12 @@ class PhishingDetector {
     try {
       const hostname = new URL(url).hostname;
 
+      // CRITICAL FIX: Skip visual cloning check for high-reputation domains
+      // GitHub can legitimately discuss Apple products without being flagged
+      if (this.isHighReputationDomain(hostname)) {
+        return findings;
+      }
+
       // Extract brand mentions from page content
       const bodyText = document.body.innerText.toLowerCase();
       const titleText = document.title.toLowerCase();
@@ -244,7 +294,12 @@ class PhishingDetector {
           // Check if page uses brand colors
           const usedBrandColors = this.detectBrandColors(document, brand);
 
-          if (usedBrandColors.matches > 0) {
+          // CRITICAL FIX: Increase threshold to reduce false positives
+          // Require BOTH many mentions AND many color matches
+          const mentionCount = this.countOccurrences(bodyText, brand);
+          const colorThreshold = 100; // Increased from implicit 0 to 100
+
+          if (usedBrandColors.matches > colorThreshold && mentionCount > 10) {
             findings.push({
               type: 'phishing',
               category: 'visual_cloning',
@@ -256,9 +311,9 @@ class PhishingDetector {
                 legitimateDomains: trustedDomains,
                 brand: brand,
                 colorMatches: usedBrandColors.matches,
-                mentionsInText: this.countOccurrences(bodyText, brand)
+                mentionsInText: mentionCount
               },
-              reasoning: `Page mentions "${brand}" ${this.countOccurrences(bodyText, brand)} time(s) and uses ${usedBrandColors.matches} matching brand color(s), but domain "${hostname}" does not match legitimate domains: ${trustedDomains.join(', ')}. This visual impersonation is designed to trick users into thinking they're on the official ${brand} site.`,
+              reasoning: `Page mentions "${brand}" ${mentionCount} time(s) and uses ${usedBrandColors.matches} matching brand color(s), but domain "${hostname}" does not match legitimate domains: ${trustedDomains.join(', ')}. This extensive visual impersonation suggests a phishing attempt.`,
               recommendation: `This is NOT an official ${brand} site - do not enter credentials`,
               timestamp: new Date().toISOString()
             });

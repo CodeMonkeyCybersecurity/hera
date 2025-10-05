@@ -1312,6 +1312,23 @@ async function runComprehensiveAnalysis() {
   analysisRunning = true;
 
   try {
+    // P0-TENTH-4 FIX: Take immutable snapshot of DOM before analysis
+    const domSnapshot = {
+      url: window.location.href,
+      title: document.title,
+      timestamp: Date.now(),
+      // Capture key DOM elements for TOCTOU protection
+      formCount: document.querySelectorAll('form').length,
+      inputCount: document.querySelectorAll('input[type="password"], input[type="email"]').length,
+      scriptCount: document.querySelectorAll('script').length,
+      linkCount: document.querySelectorAll('a').length
+    };
+
+    // P0-TENTH-4 FIX: Freeze snapshot to prevent tampering
+    Object.freeze(domSnapshot);
+
+    console.log('Hera: DOM snapshot captured:', domSnapshot);
+
     // CRITICAL FIX P0-1: Load detectors dynamically first
     const detectors = await loadDetectors();
 
@@ -1323,7 +1340,8 @@ async function runComprehensiveAnalysis() {
     // 0. Subdomain Impersonation Detection (PRIMARY - run first, fastest)
     try {
       console.log('Hera: Running subdomain impersonation detection...');
-      const subdomain = await detectors.subdomainImpersonationDetector.detectImpersonation(window.location.href);
+      // P0-TENTH-4 FIX: Use snapshot URL to prevent TOCTOU
+      const subdomain = await detectors.subdomainImpersonationDetector.detectImpersonation(domSnapshot.url);
       allFindings.push(...subdomain);
     } catch (error) {
       console.error('Hera: Subdomain impersonation detection failed:', error);

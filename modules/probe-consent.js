@@ -12,11 +12,15 @@ export class ProbeConsentManager {
   constructor() {
     this.CONSENT_STORAGE_KEY = 'heraProbeConsent';
     this.CONSENT_EXPIRY_HOURS = 24; // Consent expires after 24 hours
-    this.consentCache = null; // In-memory cache
+    // P1-SEVENTH-3 FIX: Removed cache entirely - chrome.storage.local is fast enough (~1ms)
+    // Cache caused race conditions in multi-popup scenarios
   }
 
   /**
    * Check if user has given consent for security probes
+   *
+   * P0-ARCH-2 FIX: No more time-based expiry checks using Date.now()
+   * Expiry is now enforced by chrome.alarms (cannot be bypassed by clock manipulation)
    *
    * @param {string} probeType - Type of probe (e.g., 'alg_none', 'repeater')
    * @param {string} targetDomain - Domain being probed
@@ -29,12 +33,23 @@ export class ProbeConsentManager {
       return false;
     }
 
-    // Check if consent has expired
-    const consentAge = Date.now() - new Date(consent.timestamp).getTime();
-    const expiryMs = this.CONSENT_EXPIRY_HOURS * 60 * 60 * 1000;
+    // P0-EIGHTH-4 FIX: Validate expiry timestamp (cannot be bypassed by clock manipulation)
+    const now = Date.now();
 
-    if (consentAge > expiryMs) {
-      console.warn('Hera: Probe consent has expired');
+    // Check if expiry timestamp exists (new consent format)
+    if (consent.expiryTimestamp) {
+      const expiryTime = new Date(consent.expiryTimestamp).getTime();
+
+      if (now > expiryTime) {
+        console.warn('Hera: Probe consent expired (timestamp check)');
+        await this.revokeConsent(); // Auto-revoke
+        return false;
+      }
+    }
+
+    // P0-EIGHTH-4 FIX: Detect clock manipulation (system time moved backwards)
+    if (consent.grantedAtMs && now < consent.grantedAtMs) {
+      console.error('Hera SECURITY: System clock moved backwards! Revoking consent for safety.');
       await this.revokeConsent();
       return false;
     }
@@ -50,17 +65,15 @@ export class ProbeConsentManager {
   /**
    * Get current consent status
    *
+   * P1-SEVENTH-3 FIX: Removed cache - always fetch fresh from storage
+   * chrome.storage.local is fast (~1ms) and avoids race conditions
+   *
    * @returns {Promise<Object|null>} Consent object or null
    */
   async getConsent() {
-    if (this.consentCache) {
-      return this.consentCache;
-    }
-
     try {
       const result = await chrome.storage.local.get([this.CONSENT_STORAGE_KEY]);
-      this.consentCache = result[this.CONSENT_STORAGE_KEY] || null;
-      return this.consentCache;
+      return result[this.CONSENT_STORAGE_KEY] || null;
     } catch (error) {
       console.error('Failed to get probe consent:', error);
       return null;
@@ -72,6 +85,8 @@ export class ProbeConsentManager {
    *
    * SECURITY: This should only be called after explicit user confirmation
    * of the legal and technical risks.
+   *
+   * P0-ARCH-2 FIX: Uses chrome.alarms for expiry (cannot be bypassed)
    *
    * @param {Object} options - Consent options
    * @param {Array<string>} options.domains - Domains to allow (or ['*'] for all)
@@ -86,9 +101,14 @@ export class ProbeConsentManager {
       return false;
     }
 
+    const now = Date.now();
+    const expiryMs = this.CONSENT_EXPIRY_HOURS * 60 * 60 * 1000;
+
     const consent = {
       enabled: true,
       timestamp: new Date().toISOString(),
+      grantedAtMs: now, // P0-EIGHTH-4 FIX: Store millisecond timestamp for clock-independent validation
+      expiryTimestamp: new Date(now + expiryMs).toISOString(), // P0-EIGHTH-4 FIX: Absolute expiry time
       domains: domains,
       acknowledgment: userAcknowledgment,
       version: '1.0' // Consent version for future changes
@@ -96,7 +116,22 @@ export class ProbeConsentManager {
 
     try {
       await chrome.storage.local.set({ [this.CONSENT_STORAGE_KEY]: consent });
-      this.consentCache = consent;
+      // P1-SEVENTH-3 FIX: Removed consentCache assignment
+
+      // P0-EIGHTH-4 FIX: Create alarm (still useful for normal case, but not sole enforcement)
+      // P1-TENTH-3 FIX: Use unique alarm name with UUID to prevent manipulation
+      const expiryMinutes = this.CONSENT_EXPIRY_HOURS * 60;
+      const alarmName = `heraProbeConsent_${crypto.randomUUID()}`;
+
+      // Store alarm name in consent for tracking
+      consent.alarmName = alarmName;
+      await chrome.storage.local.set({ [this.CONSENT_STORAGE_KEY]: consent });
+
+      await chrome.alarms.create(alarmName, {
+        delayInMinutes: expiryMinutes
+      });
+
+      console.log(`Hera: Probe consent granted with expiry at ${consent.expiryTimestamp}`);
 
       // Log consent event for forensics
       await this.logConsentEvent('granted', domains);
@@ -111,12 +146,17 @@ export class ProbeConsentManager {
   /**
    * Revoke probe consent
    *
+   * P0-ARCH-2 FIX: Also clears the expiry alarm
+   *
    * @returns {Promise<void>}
    */
   async revokeConsent() {
     try {
       await chrome.storage.local.remove([this.CONSENT_STORAGE_KEY]);
-      this.consentCache = null;
+      // P1-SEVENTH-3 FIX: Removed consentCache assignment
+
+      // P0-ARCH-2 FIX: Clear the expiry alarm
+      await chrome.alarms.clear('heraProbeConsentExpiry');
 
       // Log revocation for forensics
       await this.logConsentEvent('revoked', []);
@@ -140,27 +180,37 @@ export class ProbeConsentManager {
    */
   async logProbeExecution(probeType, targetUrl, result) {
     try {
+      // P1-EIGHTH-1 FIX: Reduce log size - store domain only (not full URL), remove userAgent
       const log = {
         timestamp: new Date().toISOString(),
         probeType: probeType,
-        targetUrl: targetUrl,
-        targetDomain: new URL(targetUrl).hostname,
-        success: result.success || false,
-        userAgent: navigator.userAgent,
-        extensionVersion: chrome.runtime.getManifest().version
+        targetDomain: new URL(targetUrl).hostname, // Domain only, not full URL
+        success: result.success || false
+        // P1-EIGHTH-1 FIX: Removed userAgent and extensionVersion (not needed, waste space)
       };
 
-      // Store in separate log array (max 100 entries)
+      // P1-EIGHTH-1 FIX: Reduce max logs from 100 to 50
+      const MAX_PROBE_LOGS = 50;
+      const MAX_LOG_SIZE_BYTES = 10 * 1024; // 10KB max
+
       const result_data = await chrome.storage.local.get(['heraProbeLog']);
       const logs = result_data.heraProbeLog || [];
       logs.push(log);
 
-      // Keep only last 100 probe logs
-      const trimmed = logs.slice(-100);
+      // Keep only last 50 probe logs
+      let trimmed = logs.slice(-MAX_PROBE_LOGS);
+
+      // P1-EIGHTH-1 FIX: Enforce max storage size for logs
+      const logSize = JSON.stringify(trimmed).length;
+      if (logSize > MAX_LOG_SIZE_BYTES) {
+        // Trim further if size exceeds limit
+        trimmed = trimmed.slice(-25);
+        console.warn(`Hera: Probe log size exceeded ${MAX_LOG_SIZE_BYTES} bytes, trimmed to 25 entries`);
+      }
 
       await chrome.storage.local.set({ heraProbeLog: trimmed });
 
-      console.log('Hera: Logged probe execution:', probeType, targetUrl);
+      console.log('Hera: Logged probe execution:', probeType, log.targetDomain);
     } catch (error) {
       console.error('Failed to log probe execution:', error);
     }

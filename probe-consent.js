@@ -58,6 +58,9 @@ async function loadProbeHistory() {
     return;
   }
 
+  // TODO P2-TENTH-3: innerHTML with user-controlled probe data creates XSS vector
+  // entry.targetDomain could contain <script> if probe log is compromised
+  // Should use DOM methods (createElement/textContent). See TENTH-REVIEW-FINDINGS.md:2056
   probeHistoryDiv.innerHTML = history.reverse().slice(0, 20).map(entry => {
     const statusClass = entry.success ? 'success' : 'error';
     const statusIcon = entry.success ? '✓' : '✗';

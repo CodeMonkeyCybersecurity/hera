@@ -2,6 +2,10 @@
 // CRITICAL FIX P0-NEW: Migrated to chrome.storage.local (was chrome.storage.session)
 // Prevents split-brain storage architecture issues
 
+// TODO P2-TENTH-5: Session correlation data could enable cross-site tracking fingerprinting
+// Ecosystem correlation (Google/Microsoft/etc) is powerful but creates privacy risk if leaked
+// Should restrict correlation access to popup context only. See TENTH-REVIEW-FINDINGS.md:2165
+
 export class SessionTracker {
   constructor() {
     // In-memory caches
@@ -11,6 +15,10 @@ export class SessionTracker {
     this._authenticatedDomains = new Set();
 
     this.temporalWindow = 30000; // 30 seconds for temporal correlation
+
+    // P1-SEVENTH-1 FIX: Prevent unbounded session growth
+    this.MAX_SESSIONS = 500;
+
     this.initialized = false;
     this.initPromise = this.initialize();
   }
@@ -128,6 +136,45 @@ export class SessionTracker {
       this.addDomainToSession(correlatedSession.id, domain);
       console.log(`Correlated ${domain} with existing ${service} session (${correlatedSession.correlationReason})`);
       return correlatedSession;
+    }
+
+    // P1-SEVENTH-1 FIX: Enforce max sessions with LRU eviction
+    if (this._currentSessions.size >= this.MAX_SESSIONS) {
+      // Find oldest session by lastActivity timestamp
+      let oldestId = null;
+      let oldestTime = Infinity;
+
+      for (const [id, session] of this._currentSessions.entries()) {
+        if (session.lastActivity < oldestTime) {
+          oldestTime = session.lastActivity;
+          oldestId = id;
+        }
+      }
+
+      if (oldestId) {
+        const evicted = this._currentSessions.get(oldestId);
+
+        // Clean up domain mappings
+        for (const d of evicted.domains) {
+          if (this._domainToSession.get(d) === oldestId) {
+            this._domainToSession.delete(d);
+          }
+        }
+
+        // Clean up tab mappings
+        for (const tid of evicted.tabIds) {
+          const sessionIds = this._tabSessions.get(tid);
+          if (sessionIds) {
+            sessionIds.delete(oldestId);
+            if (sessionIds.size === 0) {
+              this._tabSessions.delete(tid);
+            }
+          }
+        }
+
+        this._currentSessions.delete(oldestId);
+        console.log(`Hera: Session LRU eviction removed oldest session (${evicted.service}/${evicted.primaryDomain}, inactive for ${Date.now() - evicted.lastActivity}ms)`);
+      }
     }
 
     // 2. Create new session with smart grouping

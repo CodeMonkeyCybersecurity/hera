@@ -9,6 +9,45 @@ import { privacyConsentManager } from './privacy-consent.js';
 const ipCache = ipCacheManager.ipCache;
 const ipRequestQueue = ipCacheManager.ipRequestQueue;
 
+// P2-EIGHTH-2 FIX: IP Geolocation API Rate Limiter
+class IPGeoRateLimiter {
+  constructor(maxPerDay = 500) {
+    this.maxPerDay = maxPerDay;
+    this.callCount = 0;
+    this.windowStart = Date.now();
+    this.lastReset = Date.now();
+  }
+
+  canMakeRequest() {
+    const now = Date.now();
+    const windowDuration = 24 * 60 * 60 * 1000; // 24 hours
+
+    // Reset window if expired
+    if (now - this.windowStart >= windowDuration) {
+      this.callCount = 0;
+      this.windowStart = now;
+      this.lastReset = now;
+      console.log('Hera: IP geolocation rate limit window reset');
+    }
+
+    if (this.callCount >= this.maxPerDay) {
+      const resetTime = new Date(this.windowStart + windowDuration);
+      console.warn(`Hera: IP geolocation rate limit reached (${this.callCount}/${this.maxPerDay}). Resets at ${resetTime.toLocaleTimeString()}`);
+      return false;
+    }
+
+    this.callCount++;
+    return true;
+  }
+
+  getRemainingRequests() {
+    return Math.max(0, this.maxPerDay - this.callCount);
+  }
+}
+
+// P2-EIGHTH-2 FIX: Global rate limiter instance (500 requests/day)
+const geoRateLimiter = new IPGeoRateLimiter(500);
+
 /**
  * Resolves IP addresses for a hostname using DNS over HTTPS (DoH)
  *
@@ -58,8 +97,21 @@ export async function resolveIPAddresses(hostname) {
   }
 
   try {
-    // Use DNS over HTTPS to resolve IP addresses
-    const dohEndpoint = `https://cloudflare-dns.com/dns-query?name=${hostname}&type=A`;
+    // P0-EIGHTH-1 FIX: Validate hostname format (prevent DNS query smuggling)
+    if (!/^[a-z0-9.-]+$/i.test(hostname)) {
+      console.error('Hera: Invalid hostname format:', hostname);
+      ipInfo.error = 'INVALID_HOSTNAME';
+      ipInfo.threatLevel = 'critical';
+      return ipInfo;
+    }
+
+    // P0-EIGHTH-1 FIX: URL-encode hostname to prevent query parameter injection
+    const encodedHostname = encodeURIComponent(hostname);
+
+    // P0-EIGHTH-1 FIX: Request DNSSEC validation from Cloudflare
+    // do=true: Request DNSSEC validation bit in response
+    // cd=false: Checking disabled flag = false (fail if DNSSEC validation fails)
+    const dohEndpoint = `https://cloudflare-dns.com/dns-query?name=${encodedHostname}&type=A&do=true&cd=false`;
 
     const response = await fetch(dohEndpoint, {
       headers: {
@@ -69,6 +121,18 @@ export async function resolveIPAddresses(hostname) {
 
     if (response.ok) {
       const dnsData = await response.json();
+
+      // P0-EIGHTH-1 FIX: Verify DNSSEC authenticated data bit
+      if (dnsData.AD === false) {
+        // AD (Authenticated Data) bit not set - DNSSEC validation FAILED or not available
+        console.warn('Hera: DNSSEC validation failed for', hostname);
+        ipInfo.threatLevel = 'high';
+        ipInfo.dnssecFailed = true;
+        ipInfo.securityWarning = 'DNS response not authenticated by DNSSEC - data may be spoofed';
+      } else if (dnsData.AD === true) {
+        console.log('Hera: DNSSEC validation successful for', hostname);
+        ipInfo.dnssecValidated = true;
+      }
 
       if (dnsData.Answer) {
         for (const record of dnsData.Answer) {
@@ -146,6 +210,13 @@ export async function getIPGeolocation(ip) {
   // Prevent duplicate requests
   if (ipRequestQueue.has(ip)) {
     console.log(`IP request already in progress for ${ip}`);
+    return null;
+  }
+
+  // P2-EIGHTH-2 FIX: Check rate limit before API call
+  if (!geoRateLimiter.canMakeRequest()) {
+    console.log(`Hera: Skipping IP geolocation for ${ip} - daily rate limit reached`);
+    console.log(`Remaining requests: ${geoRateLimiter.getRemainingRequests()}/${geoRateLimiter.maxPerDay}`);
     return null;
   }
 

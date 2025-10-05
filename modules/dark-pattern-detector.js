@@ -15,23 +15,25 @@ class DarkPatternDetector {
     };
 
     // Detection configuration
+    // P1-NINTH-2 FIX: Non-backtracking patterns with length limits
     this.config = {
       urgencyKeywords: [
-        'only \\d+ left', 'selling fast', 'limited time', 'hurry',
+        'only \\d{1,5} left',  // P1-NINTH-2 FIX: Max 5 digits (99,999 max) to prevent ReDoS
+        'selling fast', 'limited time', 'hurry',
         'act now', 'expires soon', 'last chance', 'almost gone',
         'hot deal', 'don\'t miss out', 'while supplies last'
       ],
       confirmshamingKeywords: [
-        'no thanks, i (don\'t want|prefer) to',
-        'no, i (don\'t like|hate) (money|savings|deals)',
+        'no thanks, i (?:don\'t want|prefer) to',  // P1-NINTH-2 FIX: Non-capturing group
+        'no, i (?:don\'t like|hate) (?:money|savings|deals)',
         'continue without',
-        'skip this (offer|deal)',
+        'skip this (?:offer|deal)',
         'i\'ll pay full price',
         'no, i\'m not interested in'
       ],
       sneakingKeywords: [
-        'auto-renew', 'automatically (charge|bill|renew)',
-        'subscription (active|enabled)', 'recurring (payment|charge)',
+        'auto-renew', 'automatically (?:charge|bill|renew)',  // P1-NINTH-2 FIX: Non-capturing group
+        'subscription (?:active|enabled)', 'recurring (?:payment|charge)',
         'pre-selected', 'opt-out', 'unsubscribe below'
       ]
     };
@@ -104,7 +106,14 @@ class DarkPatternDetector {
   // Detect urgency/scarcity patterns
   detectUrgencyPatterns(document) {
     const findings = [];
-    const bodyText = document.body.innerText.toLowerCase();
+    const MAX_TEXT_LENGTH = 10000; // P1-NINTH-2 FIX: 10KB max to prevent ReDoS
+    let bodyText = document.body.innerText.toLowerCase();
+
+    // P1-NINTH-2 FIX: Truncate long text to prevent ReDoS
+    if (bodyText.length > MAX_TEXT_LENGTH) {
+      console.warn(`Hera: Truncating long body text (${bodyText.length} chars) to prevent ReDoS`);
+      bodyText = bodyText.substring(0, MAX_TEXT_LENGTH);
+    }
 
     for (const pattern of this.config.urgencyKeywords) {
       const regex = new RegExp(pattern, 'gi');

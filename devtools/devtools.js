@@ -1,3 +1,7 @@
+// TODO P3-TENTH-1: Review DevTools CSP compliance
+// manifest.json defines CSP for extension_pages but DevTools may have different requirements
+// Verify no eval() usage and check if inline scripts comply with CSP. See TENTH-REVIEW-FINDINGS.md:2249
+
 // Create a connection to the background page
 const backgroundPageConnection = chrome.runtime.connect({
   name: 'devtools-page'

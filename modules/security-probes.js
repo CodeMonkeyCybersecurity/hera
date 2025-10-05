@@ -206,10 +206,14 @@ export async function performAlgNoneProbe(originalRequest, jwt, sender) {
     });
 
     // Perform the fetch request
+    // P0-NEW-2 FIX: Explicit CORS mode and no credentials to prevent SSRF bypass
     const response = await fetch(originalRequest.url, {
       method: method,
       headers: newHeaders,
       body: method !== 'GET' && method !== 'HEAD' ? originalRequest.requestBody : undefined,
+      mode: 'cors', // Explicit CORS - no opaque responses
+      credentials: 'omit', // Never send cookies/auth to probe target
+      redirect: 'manual' // Don't follow redirects automatically
     });
 
     const result = { success: response.ok, status: response.status, statusText: response.statusText };
@@ -351,10 +355,14 @@ export async function performRepeaterRequest(rawRequest, sender) {
     const body = bodyIndex !== -1 ? lines.slice(bodyIndex).join('\n') : undefined;
 
     // Perform the fetch request
+    // P0-NEW-2 FIX: Explicit CORS mode and no credentials to prevent SSRF bypass
     const response = await fetch(url, {
       method: method,
       headers: headers,
       body: body,
+      mode: 'cors', // Explicit CORS - no opaque responses
+      credentials: 'omit', // Never send cookies/auth to probe target
+      redirect: 'manual' // Don't follow redirects automatically
     });
 
     // Format the raw HTTP response

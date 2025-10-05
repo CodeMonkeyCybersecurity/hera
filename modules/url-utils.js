@@ -85,6 +85,17 @@ export function hasSensitiveParameters(params) {
  * // Returns ['non_standard_oauth_domain', 'suspicious_tld']
  */
 export function detectSuspiciousUrlPatterns(url) {
+  // P2-EIGHTH-1 FIX: Limit URL length to prevent ReDoS
+  const MAX_URL_LENGTH = 2000; // RFC 2616 suggests 2KB limit
+
+  // TODO P1-TENTH-5: URL truncation creates phishing bypass vulnerability
+  // Attacker can hide malicious params after 2000 chars. Should flag oversized URLs
+  // as suspicious instead of silently truncating. See TENTH-REVIEW-FINDINGS.md:1599
+  if (url.length > MAX_URL_LENGTH) {
+    console.warn(`Hera: URL too long (${url.length} chars), truncating for pattern analysis`);
+    url = url.substring(0, MAX_URL_LENGTH);
+  }
+
   const patterns = [];
   const lowerUrl = url.toLowerCase();
 
@@ -228,6 +239,38 @@ export function validateProbeRequest(requestUrl, senderTabUrl) {
           (parts[0] === 192 && parts[1] === 168) ||
           (parts[0] === 169 && parts[1] === 254)) {
         return { valid: false, error: 'Blocked private IP address' };
+      }
+    }
+
+    // P1-EIGHTH-3 FIX: Block IPv6 loopback and private ranges
+    if (hostname.startsWith('[') && hostname.endsWith(']')) {
+      const ipv6 = hostname.slice(1, -1).toLowerCase();
+
+      // Block loopback (::1 and 0:0:0:0:0:0:0:1)
+      if (ipv6 === '::1' || ipv6 === '0:0:0:0:0:0:0:1') {
+        return { valid: false, error: 'Blocked IPv6 loopback address' };
+      }
+
+      // Block link-local (fe80::/10)
+      if (ipv6.startsWith('fe80:')) {
+        return { valid: false, error: 'Blocked IPv6 link-local address' };
+      }
+
+      // Block unique local addresses (fc00::/7 and fd00::/8)
+      if (ipv6.startsWith('fc') || ipv6.startsWith('fd')) {
+        return { valid: false, error: 'Blocked IPv6 private address (ULA)' };
+      }
+
+      // Block IPv4-mapped IPv6 addresses (::ffff:192.168.0.1)
+      if (ipv6.includes('::ffff:')) {
+        const ipv4Part = ipv6.split('::ffff:')[1];
+        if (ipv4Part) {
+          // Recursively validate the IPv4 part
+          const ipv4Validation = validateProbeRequest(`http://${ipv4Part}/`, senderTabUrl);
+          if (!ipv4Validation.valid) {
+            return { valid: false, error: 'Blocked IPv4-mapped IPv6 private address' };
+          }
+        }
       }
     }
 

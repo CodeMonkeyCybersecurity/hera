@@ -43,15 +43,54 @@ export function analyzeJWT(tokenValue) {
     // Extract JWT from various formats
     let jwt = tokenValue.replace(/^Bearer\s+/i, '').replace(/^jwt\s+/i, '').trim();
 
+    // P1-TENTH-4 FIX: Validate JWT size to prevent memory exhaustion
+    const MAX_JWT_SIZE = 16 * 1024; // 16KB max (typical JWTs are <1KB)
+    if (jwt.length > MAX_JWT_SIZE) {
+      console.warn(`Hera: JWT too large (${jwt.length} bytes), rejecting to prevent DoS`);
+      analysis.riskFactors.push({
+        type: 'JWT_TOO_LARGE',
+        severity: 'HIGH',
+        points: 50,
+        description: `JWT size ${jwt.length} bytes exceeds safe limit ${MAX_JWT_SIZE} bytes`,
+        recommendation: 'JWTs should be small (<1KB). Large tokens may indicate attack or misconfiguration.'
+      });
+      return analysis;
+    }
+
     // Basic JWT format check
     const parts = jwt.split('.');
     if (parts.length !== 3) {
       return analysis; // Not a valid JWT
     }
 
-    // Decode header and payload
-    const header = JSON.parse(atob(parts[0].replace(/-/g, '+').replace(/_/g, '/')));
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    // P1-TENTH-4 FIX: Validate individual part sizes before decoding
+    if (parts[0].length > 5000 || parts[1].length > 10000 || parts[2].length > 1000) {
+      console.warn('Hera: JWT part size exceeds safety threshold');
+      analysis.riskFactors.push({
+        type: 'JWT_PART_TOO_LARGE',
+        severity: 'HIGH',
+        points: 50,
+        description: 'JWT header/payload/signature part is abnormally large',
+        recommendation: 'Review JWT structure for potential attack or misconfiguration'
+      });
+      return analysis;
+    }
+
+    // Decode header and payload with error handling
+    let header, payload;
+    try {
+      header = JSON.parse(atob(parts[0].replace(/-/g, '+').replace(/_/g, '/')));
+    } catch (e) {
+      console.error('Hera: Failed to decode JWT header:', e);
+      return analysis; // Invalid header
+    }
+
+    try {
+      payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    } catch (e) {
+      console.error('Hera: Failed to decode JWT payload:', e);
+      return analysis; // Invalid payload
+    }
 
     analysis.decodedToken = {
       header: header,
@@ -62,6 +101,9 @@ export function analyzeJWT(tokenValue) {
     // Check for critical vulnerabilities
 
     // 1. Algorithm "none" vulnerability
+    // TODO P3-TENTH-2: Multiple string comparisons create timing side-channel
+    // Different execution time for 'none' vs 'None' vs 'NONE' could leak algorithm
+    // Use constant-time comparison or case-insensitive check. See TENTH-REVIEW-FINDINGS.md:2216
     if (header.alg === 'none' || header.alg === 'None' || header.alg === 'NONE') {
       analysis.riskScore += 100;
       analysis.riskFactors.push({

@@ -1,6 +1,28 @@
 // Hera - Exposed Backend Detection System
 // Prevents users from submitting data to insecure backends
 
+// P0-EIGHTH-2 FIX: SSRF Protection Helper
+function isPrivateOrMetadataIP(domain) {
+  const privateIPPatterns = [
+    /^127\./,                    // Loopback
+    /^10\./,                     // Private Class A
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // Private Class B
+    /^192\.168\./,               // Private Class C
+    /^169\.254\./,               // Link-local
+    /^0\./,                      // Invalid
+    /^169\.254\.169\.254$/,      // AWS metadata
+    /^metadata\.google\.internal$/i, // GCP metadata
+    /^100\.64\./,                // Shared address space (CGNAT)
+    /^\[::1\]$/,                 // IPv6 loopback
+    /^\[fe80:/,                  // IPv6 link-local
+    /^\[fc00:/,                  // IPv6 ULA
+    /^\[fd00:/,                  // IPv6 ULA
+    /^localhost$/i               // localhost hostname
+  ];
+
+  return privateIPPatterns.some(pattern => pattern.test(domain));
+}
+
 class ExposedBackendDetector {
   constructor() {
     this.detectionResults = new Map();
@@ -65,6 +87,17 @@ class ExposedBackendDetector {
   }
   
   async checkMongoDBExposure(domain) {
+    // P0-EIGHTH-2 FIX: SSRF Protection - Block private IPs and metadata endpoints
+    if (isPrivateOrMetadataIP(domain)) {
+      console.warn(`Hera: Blocked MongoDB scan on private/metadata IP: ${domain}`);
+      return {
+        exposed: false,
+        blocked: true,
+        reason: 'SSRF Protection: Scanning private IP addresses is not allowed',
+        severity: 'blocked'
+      };
+    }
+
     const endpoints = [
       `http://${domain}:27017/`,
       `http://${domain}:27018/`,
@@ -74,9 +107,17 @@ class ExposedBackendDetector {
       `https://db.${domain}/`,
       `https://mongodb.${domain}/`
     ];
-    
+
     for (const endpoint of endpoints) {
       try {
+        // P0-EIGHTH-2 FIX: Validate EACH endpoint URL before fetching
+        const endpointDomain = new URL(endpoint).hostname;
+
+        if (isPrivateOrMetadataIP(endpointDomain)) {
+          console.warn(`Hera: Blocked SSRF to private endpoint: ${endpoint}`);
+          continue; // Skip this endpoint
+        }
+
         // Check for MongoDB REST API
         const response = await this.fetchWithTimeout(`${endpoint}admin/listDatabases?text=1`, 3000);
         
@@ -126,6 +167,12 @@ class ExposedBackendDetector {
   }
   
   async checkS3Exposure(domain) {
+    // P0-EIGHTH-2 FIX: SSRF Protection
+    if (isPrivateOrMetadataIP(domain)) {
+      console.warn(`Hera: Blocked S3 scan on private/metadata IP: ${domain}`);
+      return { exposed: false, blocked: true, reason: 'SSRF Protection', severity: 'blocked' };
+    }
+
     const bucketPatterns = [
       `https://s3.amazonaws.com/${domain}`,
       `https://${domain}.s3.amazonaws.com`,
@@ -191,6 +238,12 @@ class ExposedBackendDetector {
   }
   
   async checkElasticsearchExposure(domain) {
+    // P0-EIGHTH-2 FIX: SSRF Protection
+    if (isPrivateOrMetadataIP(domain)) {
+      console.warn(`Hera: Blocked Elasticsearch scan on private/metadata IP: ${domain}`);
+      return { exposed: false, blocked: true, reason: 'SSRF Protection', severity: 'blocked' };
+    }
+
     const endpoints = [
       `http://${domain}:9200/`,
       `https://${domain}:9200/`,
@@ -245,6 +298,12 @@ class ExposedBackendDetector {
   }
   
   async checkFirebaseExposure(domain) {
+    // P0-EIGHTH-2 FIX: SSRF Protection
+    if (isPrivateOrMetadataIP(domain)) {
+      console.warn(`Hera: Blocked Firebase scan on private/metadata IP: ${domain}`);
+      return { exposed: false, blocked: true, reason: 'SSRF Protection', severity: 'blocked' };
+    }
+
     const firebasePatterns = [
       `https://${domain}.firebaseio.com/.json`,
       `https://${domain}-default-rtdb.firebaseio.com/.json`,
@@ -297,6 +356,12 @@ class ExposedBackendDetector {
   }
   
   async checkRedisExposure(domain) {
+    // P0-EIGHTH-2 FIX: SSRF Protection
+    if (isPrivateOrMetadataIP(domain)) {
+      console.warn(`Hera: Blocked Redis scan on private/metadata IP: ${domain}`);
+      return { exposed: false, blocked: true, reason: 'SSRF Protection', severity: 'blocked' };
+    }
+
     // Redis typically runs on port 6379
     // We can't directly connect from browser, but check for Redis web interfaces
     const endpoints = [
@@ -339,6 +404,12 @@ class ExposedBackendDetector {
   }
   
   async checkGraphQLExposure(domain) {
+    // P0-EIGHTH-2 FIX: SSRF Protection
+    if (isPrivateOrMetadataIP(domain)) {
+      console.warn(`Hera: Blocked GraphQL scan on private/metadata IP: ${domain}`);
+      return { exposed: false, blocked: true, reason: 'SSRF Protection', severity: 'blocked' };
+    }
+
     const endpoints = [
       `https://${domain}/graphql`,
       `https://${domain}/graphiql`,
@@ -424,6 +495,12 @@ class ExposedBackendDetector {
   }
   
   async checkGitExposure(domain) {
+    // P0-EIGHTH-2 FIX: SSRF Protection
+    if (isPrivateOrMetadataIP(domain)) {
+      console.warn(`Hera: Blocked Git scan on private/metadata IP: ${domain}`);
+      return { exposed: false, blocked: true, reason: 'SSRF Protection', severity: 'blocked' };
+    }
+
     const gitPaths = [
       '/.git/config',
       '/.git/HEAD',
@@ -465,6 +542,12 @@ class ExposedBackendDetector {
   }
   
   async checkEnvFileExposure(domain) {
+    // P0-EIGHTH-2 FIX: SSRF Protection
+    if (isPrivateOrMetadataIP(domain)) {
+      console.warn(`Hera: Blocked ENV scan on private/metadata IP: ${domain}`);
+      return { exposed: false, blocked: true, reason: 'SSRF Protection', severity: 'blocked' };
+    }
+
     const envPaths = [
       '/.env',
       '/.env.local',
