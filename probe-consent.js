@@ -1,3 +1,6 @@
+// P0-FOURTEENTH-1 FIX: Line 120-145 - Fixed XSS in consent status display
+// Replaced innerHTML with createElement() and textContent for all user-controlled data
+// (dates, time calculations) to prevent poisoning attacks via chrome.storage
 import { probeConsentManager } from './modules/probe-consent.js';
 
 // UI Elements
@@ -117,16 +120,31 @@ loadProbeHistory();
       const hoursLeft = Math.floor(timeLeft / (60 * 60 * 1000));
       const minutesLeft = Math.floor((timeLeft % (60 * 60 * 1000)) / (60 * 1000));
 
+      // P0-FOURTEENTH-1 FIX: Build DOM safely to prevent XSS if storage poisoned
       const status = document.createElement('div');
       status.className = 'warning';
-      status.innerHTML = `
-        <h2>✅ Consent Currently Active</h2>
-        <p>Expires in: <strong>${hoursLeft}h ${minutesLeft}m</strong></p>
-        <p>Granted: ${grantedDate.toLocaleString()}</p>
-        <button type="button" id="revokeBtn" class="btn-danger" style="margin-top: 10px;">
-          Revoke Consent Immediately
-        </button>
-      `;
+
+      const heading = document.createElement('h2');
+      heading.textContent = '✅ Consent Currently Active';
+      status.appendChild(heading);
+
+      const expiresP = document.createElement('p');
+      expiresP.innerHTML = 'Expires in: <strong></strong>';
+      expiresP.querySelector('strong').textContent = `${hoursLeft}h ${minutesLeft}m`;
+      status.appendChild(expiresP);
+
+      const grantedP = document.createElement('p');
+      grantedP.textContent = `Granted: ${grantedDate.toLocaleString()}`;
+      status.appendChild(grantedP);
+
+      const revokeBtn = document.createElement('button');
+      revokeBtn.type = 'button';
+      revokeBtn.id = 'revokeBtn';
+      revokeBtn.className = 'btn-danger';
+      revokeBtn.style.marginTop = '10px';
+      revokeBtn.textContent = 'Revoke Consent Immediately';
+      status.appendChild(revokeBtn);
+
       consentForm.parentElement.insertBefore(status, consentForm);
 
       document.getElementById('revokeBtn').addEventListener('click', async () => {

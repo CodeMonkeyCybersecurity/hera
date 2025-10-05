@@ -1394,13 +1394,15 @@ async function runComprehensiveAnalysis() {
 
     // Send results to background script for storage
     // SECURITY FIX P1-4: Use throttled messaging
+    // P1-THIRTEENTH-2: Include HTML for compression analysis
     sendThrottledMessage({
       type: 'ANALYSIS_COMPLETE',
       url: window.location.href,
       findings: allFindings,
       score: scoreData,
       analysisSuccessful: analysisSuccessful,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      html: document.documentElement.outerHTML // For PhishZip compression analysis
     });
 
     // Display overlay (load it dynamically if needed)

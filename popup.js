@@ -17,6 +17,10 @@
 })();
 
 // Security utilities for safe DOM manipulation and JWT processing
+// P0-FOURTEENTH-1 FIX: All user-controlled data MUST use these helpers
+// 14TH REVIEW: Fixed XSS vulnerabilities in updateSecurityAnalysis() and updateConsentTab()
+// - Line 2734: JSON.stringify output now uses textContent instead of innerHTML
+// - Line 2771-2831: Security issues now built with createElement() instead of template strings
 const DOMSecurity = {
   // Safe HTML sanitization
   sanitizeHTML: (str) => {
@@ -2731,9 +2735,16 @@ By: Hera Security Extension
     const applicationInfoEl = document.getElementById('applicationInfo');
     
     if (consentAnalysisEl) {
-      consentAnalysisEl.innerHTML = request.metadata?.consentAnalysis ? 
-        `<pre>${JSON.stringify(request.metadata.consentAnalysis, null, 2)}</pre>` :
-        'No consent analysis data available';
+      // P0-FOURTEENTH-1 FIX: Escape JSON output to prevent XSS
+      if (request.metadata?.consentAnalysis) {
+        const jsonStr = JSON.stringify(request.metadata.consentAnalysis, null, 2);
+        const pre = document.createElement('pre');
+        pre.textContent = jsonStr; // Use textContent instead of innerHTML
+        consentAnalysisEl.innerHTML = '';
+        consentAnalysisEl.appendChild(pre);
+      } else {
+        consentAnalysisEl.textContent = 'No consent analysis data available';
+      }
     }
     
     if (consentWarningsEl) {
@@ -2765,28 +2776,63 @@ By: Hera Security Extension
     const riskScore = authAnalysis.riskScore || 0;
     const riskCategory = authAnalysis.riskCategory || 'secure';
 
-    let issuesHTML = '<div class="security-summary risk-' + riskCategory + '">Risk Score: ' + riskScore + '/100</div>';
+    // P0-FOURTEENTH-1 FIX: Build DOM safely instead of innerHTML with user data
+    securityTab.innerHTML = '';
+
+    const summaryDiv = document.createElement('div');
+    summaryDiv.className = `security-summary risk-${DOMSecurity.sanitizeHTML(riskCategory)}`;
+    summaryDiv.textContent = `Risk Score: ${riskScore}/100`;
+    securityTab.appendChild(summaryDiv);
 
     if (issues.length > 0) {
-      issuesHTML += '<div class="issues-list"><h4>Detected Issues:</h4>';
-      issues.forEach(issue => {
-        issuesHTML += `
-          <div class="security-issue issue-${issue.severity.toLowerCase()}">
-            <div class="issue-header">
-              <span class="issue-severity">${issue.severity}</span>
-              <span class="issue-type">${issue.type}</span>
-            </div>
-            <div class="issue-message">${issue.message}</div>
-            ${issue.exploitation ? `<div class="issue-exploitation">${issue.exploitation}</div>` : ''}
-          </div>
-        `;
-      });
-      issuesHTML += '</div>';
-    } else {
-      issuesHTML += '<div class="no-issues">No security issues detected.</div>';
-    }
+      const issuesList = document.createElement('div');
+      issuesList.className = 'issues-list';
 
-    securityTab.innerHTML = issuesHTML;
+      const heading = document.createElement('h4');
+      heading.textContent = 'Detected Issues:';
+      issuesList.appendChild(heading);
+
+      issues.forEach(issue => {
+        const issueDiv = document.createElement('div');
+        issueDiv.className = `security-issue issue-${(issue.severity || 'unknown').toLowerCase()}`;
+
+        const headerDiv = document.createElement('div');
+        headerDiv.className = 'issue-header';
+
+        const severitySpan = document.createElement('span');
+        severitySpan.className = 'issue-severity';
+        severitySpan.textContent = issue.severity || 'UNKNOWN';
+        headerDiv.appendChild(severitySpan);
+
+        const typeSpan = document.createElement('span');
+        typeSpan.className = 'issue-type';
+        typeSpan.textContent = issue.type || 'Unknown Type';
+        headerDiv.appendChild(typeSpan);
+
+        issueDiv.appendChild(headerDiv);
+
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'issue-message';
+        messageDiv.textContent = issue.message || 'No description available';
+        issueDiv.appendChild(messageDiv);
+
+        if (issue.exploitation) {
+          const exploitDiv = document.createElement('div');
+          exploitDiv.className = 'issue-exploitation';
+          exploitDiv.textContent = issue.exploitation;
+          issueDiv.appendChild(exploitDiv);
+        }
+
+        issuesList.appendChild(issueDiv);
+      });
+
+      securityTab.appendChild(issuesList);
+    } else {
+      const noIssuesDiv = document.createElement('div');
+      noIssuesDiv.className = 'no-issues';
+      noIssuesDiv.textContent = 'No security issues detected.';
+      securityTab.appendChild(noIssuesDiv);
+    }
   }
 
   // Update headers tab

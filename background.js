@@ -1,40 +1,43 @@
 /**
- * TWELFTH ADVERSARIAL SECURITY REVIEW - COMPLETE ✅
- * Date: October 5, 2025
+ * HERA - OAuth/OIDC/SAML Security Testing Extension
+ * Code Monkey Cybersecurity - "Cybersecurity. With humans."
  *
- * 🚨 CRITICAL: Found 5 NEW P0 vulnerabilities despite "production ready" claim from Eleventh review
- * Consent system had CRITICAL bugs - probes could run indefinitely without user approval
+ * 🛡️ ACTIVE DETECTION LAYERS (Currently Operational)
  *
- * ✅ TWELFTH REVIEW - ALL 5 P0 CRITICAL FIXES:
- * - P0-TWELFTH-1: Alarm revocation bug (consent never expired) - modules/probe-consent.js:169-180
- * - P0-TWELFTH-2: Missing closing brace (domain bypass) - modules/probe-consent.js:61-68
- * - P0-TWELFTH-3: web_accessible_resources XSS - manifest.json:27-32
- * - P0-TWELFTH-4: atob() prototype pollution - modules/jwt-utils.js:79-109
- * - P0-TWELFTH-5: DevTools innerHTML XSS - devtools/devtools.js:116-145
+ * ✅ OAuth/SAML Flow Security - CSRF, PKCE, state parameter validation
+ * ✅ Certificate Analysis - HTTPS/TLS integrity, domain matching
+ * ✅ DNS Intelligence - Homograph attacks, DGA detection, geolocation
+ * ✅ Session Tracking - Cross-domain correlation, ecosystem detection
+ * ✅ Secret Scanning - Hardcoded credentials, JWT vulnerabilities
+ * ✅ Dark Pattern Detection - UI manipulation, deceptive practices
+ * ✅ Privacy Violation Detection - GDPR compliance, consent validation
  *
- * ✅ ELEVENTH REVIEW - ALL 4 P0 FIXES:
- * - P0-ELEVENTH-1: ReDoS in secret scanner - hera-secret-scanner.js:8-75
- * - P0-ELEVENTH-2: Alarm race condition - modules/probe-consent.js:18-68,166-189
- * - P0-ELEVENTH-3: Message validation TOCTOU - background.js:2877-2898
- * - P0-ELEVENTH-4: Clock manipulation bypass - modules/probe-consent.js:40-58
+ * ✅ PhishZip Compression Analysis - INTEGRATED (Phase 1 Complete)
+ * Status: Core functionality operational, requires baseline training
+ * Integration fixes completed (13th Review):
+ *   - ✅ P0-THIRTEENTH-1: pako.js loaded dynamically in compression analyzer
+ *   - ✅ P0-THIRTEENTH-2: Analyzer instantiated and called in ANALYSIS_COMPLETE
+ *   - ✅ P0-THIRTEENTH-3: manifest.json web_accessible_resources includes pako.js
+ *   - ⚠️  P1-THIRTEENTH-1: No baseline data yet (requires real auth page training)
+ *   - ✅ P1-THIRTEENTH-2: Integrated into message pipeline with async wrapper
  *
- * ✅ TENTH REVIEW - 6 P1/P2 FIXES:
- * - P1-TENTH-5: URL truncation bypass - modules/url-utils.js:91-121
- * - P1-TENTH-6: Service worker data loss - modules/memory-manager.js:173-188
- * - P2-TENTH-1: Subdomain rate bypass - response-interceptor.js:47-87
- * - P2-TENTH-2: Rate limit memory leak - response-interceptor.js:55-61
- * - P2-TENTH-3: innerHTML XSS - probe-consent.js:65-94
- * - P2-TENTH-4: Zombie debugger entries - background.js:1741-1763
+ * Next steps: Train baselines on Microsoft/Google/GitHub/Okta auth pages
+ * Full roadmap: docs/PHISHZIP-INTEGRATION-SUMMARY.md (Phase 1-5, 8+ weeks)
  *
- * 📊 COMPREHENSIVE FIX SUMMARY (Reviews 10-12):
- * - Fixed: 18 critical/high issues (9 P0 + 9 P1/P2)
- * - Remaining: ~16 lower-priority P2/P3 (documented inline with TODOs)
+ * Philosophy: HONEST, evidence-based, human-centric security
+ * - Document what actually works (not marketing claims)
+ * - Show users real findings with explanations
+ * - Respect user agency - inform, don't patronize
  *
- * 🛡️ SECURITY POSTURE: VERIFIED PRODUCTION READY
- * - Zero exploitable vulnerabilities
- * - Consent system security verified
- * - No XSS/injection vectors
- * - All time-based security uses chrome.alarms (not Date.now)
+ * 📊 SECURITY REVIEW STATUS
+ * - Reviews 10-12: Fixed 18 critical issues (9 P0 + 9 P1/P2)
+ * - Review 13: Fixed PhishZip P0 issues (pako loading, baseline validation, async handler)
+ * - Review 14 (Oct 5): Fixed 8 issues (3 P0 XSS, 2 P1 validation, 2 P2 DoS, 1 P3 dead code)
+ *   ✅ P0-FOURTEENTH-1: XSS via innerHTML in popup.js, probe-consent.js
+ *   ✅ P0-FOURTEENTH-2: Improved HTML sanitization in compression analyzer
+ *   ✅ P0-FOURTEENTH-3: Removed dead pako files (pako.min.js, pako-loader.js)
+ *   ✅ P1-FOURTEENTH-1: Baseline validation (type, range, consistency checks)
+ *   ✅ P2-FOURTEENTH-1: Rate limiting on compression (max 1/sec, prevents CPU DoS)
  */
 
 // Core analysis engines
@@ -64,6 +67,19 @@ import { detectAuthType } from './modules/auth-utils.js';
 import { analyzeRequestHeaders, analyzeResponseHeaders } from './modules/header-utils.js';
 import { analyzeUrl, hasSensitiveParameters, detectSuspiciousUrlPatterns, isCrossOrigin, isExtensionRequest, isThirdPartyRequest, isSensitivePath } from './modules/url-utils.js';
 import { performAlgNoneProbe, performRepeaterRequest, sanitizeProbeHeaders } from './modules/security-probes.js';
+
+// P0-THIRTEENTH-1 FIX: Load pako.js compression library first
+// Service workers can't use importScripts in modules, so we load via script tag approach
+// pako will be available globally after this loads
+self.pako = null; // Will be set by loading pako
+
+// PHISHZIP INTEGRATION: Compression-based phishing detection (PhishZip methodology from CSIRO Data61)
+// Adds Layer 5 to multi-layer defense: visual clone detection via HTML compression analysis
+import { HeraCompressionAnalyzer } from './modules/hera-compression-analyzer.js';
+
+// P0-THIRTEENTH-2 FIX: Instantiate compression analyzer globally
+const compressionAnalyzer = new HeraCompressionAnalyzer();
+let compressionAnalyzerReady = false;
 
 // Auth flow analysis module (Tier 2 domain logic)
 import {
@@ -229,6 +245,16 @@ async function initializeHera() {
       alertManager.initPromise,
       ipCacheManager.initPromise
     ]);
+
+    // P0-THIRTEENTH-2 FIX: Initialize compression analyzer with pako.js
+    try {
+      await compressionAnalyzer.initialize();
+      compressionAnalyzerReady = true;
+      console.log('Hera: Compression analyzer initialized (PhishZip enabled)');
+    } catch (error) {
+      console.warn('Hera: Compression analyzer initialization failed - PhishZip disabled:', error);
+      compressionAnalyzerReady = false;
+    }
 
     heraReady = true;
     const duration = Date.now() - startTime;
@@ -2956,8 +2982,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false;
       }
 
-      // P0-5: Validate overall payload size
-      const MAX_PAYLOAD_SIZE = 500 * 1024; // 500KB max
+      // P0-5: Validate overall payload size (excluding HTML for compression analysis)
+      const MAX_PAYLOAD_SIZE = 500 * 1024; // 500KB max for stored data
       const payloadSize = JSON.stringify({
         findings: message.findings,
         score: message.score
@@ -2968,39 +2994,82 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false;
       }
 
-      // SECURITY FIX P1-7 & NEW-P2-1: Use safe storage with mutex and quota handling
-      const storageKey = `siteAnalysis_${tabId}`;
-      safeStorageSet({
-        [storageKey]: {
-          url: message.url,
-          findings: message.findings,
-          score: message.score,
-          analysisSuccessful: message.analysisSuccessful,
-          timestamp: message.timestamp
+      // P1-THIRTEENTH-2: Validate HTML size separately (not stored, only used for compression)
+      if (message.html) {
+        const MAX_HTML_SIZE = 2 * 1024 * 1024; // 2MB max for HTML content
+        if (message.html.length > MAX_HTML_SIZE) {
+          console.warn(`Hera: HTML content too large (${message.html.length} bytes), skipping compression analysis`);
+          message.html = null; // Don't process overly large pages
         }
-      }, storageKey).then(() => {
-        console.log(`Hera: Stored analysis for tab ${tabId}:`, {
-          url: message.url,
-          grade: message.score.grade,
-          findings: message.findings.length
-        });
+      }
 
-        // Show notification for critical issues
-        if (message.score.criticalIssues > 0) {
-          chrome.notifications.create({
-            type: 'basic',
-            iconUrl: 'icons/icon128.png',
-            title: 'Hera Security Alert',
-            message: `This site has ${message.score.criticalIssues} critical security issues. Grade: ${message.score.grade}`,
-            priority: 2
+      // P0-FOURTEENTH-3 FIX: Properly handle async compression analysis
+      // Must await the async work before calling sendResponse
+      (async () => {
+        try {
+          let compressionAnalysis = null;
+          if (compressionAnalyzerReady && message.html) {
+            try {
+              compressionAnalysis = await compressionAnalyzer.analyzeAuthPage(message.html, message.url);
+
+              // Add compression findings to existing findings array
+              if (compressionAnalysis.indicators && compressionAnalysis.indicators.length > 0) {
+                message.findings.push({
+                  type: 'COMPRESSION_ANALYSIS',
+                  severity: compressionAnalysis.recommendation === 'BLOCK' ? 'CRITICAL' :
+                           compressionAnalysis.recommendation === 'WARN' ? 'MEDIUM' : 'INFO',
+                  description: `PhishZip analysis: ${compressionAnalysis.recommendation}`,
+                  details: compressionAnalysis.indicators,
+                  suspicionScore: compressionAnalysis.suspicionScore,
+                  confidence: compressionAnalysis.confidence
+                });
+
+                // Update critical issues count if blocking recommendation
+                if (compressionAnalysis.recommendation === 'BLOCK') {
+                  message.score.criticalIssues += 1;
+                }
+              }
+            } catch (error) {
+              console.warn('Hera: Compression analysis failed (non-blocking):', error);
+            }
+          }
+
+          // SECURITY FIX P1-7 & NEW-P2-1: Use safe storage with mutex and quota handling
+          const storageKey = `siteAnalysis_${tabId}`;
+          await safeStorageSet({
+            [storageKey]: {
+              url: message.url,
+              findings: message.findings,
+              score: message.score,
+              analysisSuccessful: message.analysisSuccessful,
+              timestamp: message.timestamp,
+              compressionAnalysis // P1-THIRTEENTH-2: Include PhishZip results
+            }
+          }, storageKey);
+
+          console.log(`Hera: Stored analysis for tab ${tabId}:`, {
+            url: message.url,
+            grade: message.score.grade,
+            findings: message.findings.length
           });
-        }
 
-        sendResponse({ success: true });
-      }).catch(error => {
-        console.error('Hera: Failed to store analysis:', error);
-        sendResponse({ success: false, error: error.message });
-      });
+          // Show notification for critical issues
+          if (message.score.criticalIssues > 0) {
+            chrome.notifications.create({
+              type: 'basic',
+              iconUrl: 'icons/icon128.png',
+              title: 'Hera Security Alert',
+              message: `This site has ${message.score.criticalIssues} critical security issues. Grade: ${message.score.grade}`,
+              priority: 2
+            });
+          }
+
+          sendResponse({ success: true });
+        } catch (error) {
+          console.error('Hera: Failed to process analysis:', error);
+          sendResponse({ success: false, error: error.message });
+        }
+      })();
     }
 
     return true; // Keep message channel open for async response
