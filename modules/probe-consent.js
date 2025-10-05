@@ -60,9 +60,12 @@ export class ProbeConsentManager {
       // Check if this domain is in the consent list
       if (consent.domains && !consent.domains.includes('*')) {
         return consent.domains.includes(targetDomain);
-    }
+      }
 
-    return true;
+      // P0-TWELFTH-2 FIX: Added missing closing brace above
+      // Without it, this return executes outside lock scope, bypassing domain restrictions
+      return true;
+    }); // P0-ELEVENTH-2 FIX: End of consentLock.then()
   }
 
   /**
@@ -166,11 +169,20 @@ export class ProbeConsentManager {
    */
   async _unsafeRevokeConsent() {
     try {
+      // P0-TWELFTH-1 FIX: Get consent BEFORE deleting to retrieve alarm name
+      const consent = await this.getConsent();
+
+      // P0-TWELFTH-1 FIX: Clear the ACTUAL alarm with stored UUID name
+      if (consent?.alarmName) {
+        await chrome.alarms.clear(consent.alarmName);
+        console.log(`Hera: Cleared probe consent alarm: ${consent.alarmName}`);
+      }
+
+      // Also clear legacy hardcoded name for backward compatibility
+      await chrome.alarms.clear('heraProbeConsentExpiry');
+
       await chrome.storage.local.remove([this.CONSENT_STORAGE_KEY]);
       // P1-SEVENTH-3 FIX: Removed consentCache assignment
-
-      // P0-ARCH-2 FIX: Clear the expiry alarm
-      await chrome.alarms.clear('heraProbeConsentExpiry');
 
       // Log revocation for forensics
       await this.logConsentEvent('revoked', []);

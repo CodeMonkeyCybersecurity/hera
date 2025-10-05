@@ -26,14 +26,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": [
-        "response-interceptor.js",
-        "site-reputation-overlay.js",
-        "modules/dark-pattern-detector.js",
-        "modules/phishing-detector.js",
-        "modules/privacy-violation-detector.js",
-        "modules/risk-scoring-engine.js"
-      ],
+      "resources": [],
       "matches": ["<all_urls>"]
     }
   ],

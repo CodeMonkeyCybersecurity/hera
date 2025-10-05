@@ -76,17 +76,33 @@ export function analyzeJWT(tokenValue) {
       return analysis;
     }
 
+    // P0-TWELFTH-4 FIX: Sanitize JSON.parse to prevent prototype pollution
+    // Malicious JWTs could inject __proto__, constructor, or prototype properties
+    function safeJSONParse(base64String) {
+      const jsonString = atob(base64String.replace(/-/g, '+').replace(/_/g, '/'));
+      const obj = JSON.parse(jsonString);
+
+      // Remove dangerous properties that could pollute prototypes
+      if (obj && typeof obj === 'object') {
+        delete obj.__proto__;
+        delete obj.constructor;
+        delete obj.prototype;
+      }
+
+      return obj;
+    }
+
     // Decode header and payload with error handling
     let header, payload;
     try {
-      header = JSON.parse(atob(parts[0].replace(/-/g, '+').replace(/_/g, '/')));
+      header = safeJSONParse(parts[0]);
     } catch (e) {
       console.error('Hera: Failed to decode JWT header:', e);
       return analysis; // Invalid header
     }
 
     try {
-      payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+      payload = safeJSONParse(parts[1]);
     } catch (e) {
       console.error('Hera: Failed to decode JWT payload:', e);
       return analysis; // Invalid payload

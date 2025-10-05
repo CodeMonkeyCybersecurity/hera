@@ -113,20 +113,36 @@ function addRequestToUI(request) {
     requestsList.removeChild(emptyState);
   }
   
-  // Create request item
+  // P0-TWELFTH-5 FIX: Use DOM methods instead of innerHTML to prevent XSS
+  // request.url is user-controlled, could contain malicious HTML/scripts
   const requestEl = document.createElement('div');
   requestEl.className = 'request-item';
   requestEl.dataset.id = request.id;
-  
+
   const statusCode = request.statusCode || 'Pending';
   const statusClass = statusCode >= 400 ? 'error' : statusCode >= 200 && statusCode < 300 ? 'success' : '';
-  
-  requestEl.innerHTML = `
-    <div class="request-method ${statusClass}">${request.method || 'GET'}</div>
-    <div class="request-url" title="${request.url}">${request.url}</div>
-    <div class="request-type">${request.authType || 'Unknown'}</div>
-    <div class="request-status">${statusCode}</div>
-  `;
+
+  const methodDiv = document.createElement('div');
+  methodDiv.className = `request-method ${statusClass}`;
+  methodDiv.textContent = request.method || 'GET';
+
+  const urlDiv = document.createElement('div');
+  urlDiv.className = 'request-url';
+  urlDiv.title = request.url || '';
+  urlDiv.textContent = request.url || ''; // Safe - text node
+
+  const typeDiv = document.createElement('div');
+  typeDiv.className = 'request-type';
+  typeDiv.textContent = request.authType || 'Unknown';
+
+  const statusDiv = document.createElement('div');
+  statusDiv.className = 'request-status';
+  statusDiv.textContent = statusCode;
+
+  requestEl.appendChild(methodDiv);
+  requestEl.appendChild(urlDiv);
+  requestEl.appendChild(typeDiv);
+  requestEl.appendChild(statusDiv);
   
   // Add click handler to show request details
   requestEl.addEventListener('click', () => {
