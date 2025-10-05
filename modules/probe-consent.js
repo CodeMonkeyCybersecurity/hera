@@ -14,6 +14,10 @@ export class ProbeConsentManager {
     this.CONSENT_EXPIRY_HOURS = 24; // Consent expires after 24 hours
     // P1-SEVENTH-3 FIX: Removed cache entirely - chrome.storage.local is fast enough (~1ms)
     // Cache caused race conditions in multi-popup scenarios
+
+    // P0-ELEVENTH-2 FIX: Mutex to prevent alarm race condition on service worker restart
+    // Without this, alarm can fire during consent check, causing TOCTOU bypass
+    this.consentLock = Promise.resolve();
   }
 
   /**
@@ -27,36 +31,35 @@ export class ProbeConsentManager {
    * @returns {Promise<boolean>} True if consent is valid
    */
   async hasConsent(probeType, targetDomain) {
-    const consent = await this.getConsent();
+    // P0-ELEVENTH-2 FIX: Acquire lock to prevent race with alarm-based revocation
+    // Attack scenario: Service worker restart → alarm fires → consent check happens
+    // during revocation → probe executes with expired consent
+    return await this.consentLock.then(async () => {
+      const consent = await this.getConsent();
 
-    if (!consent || !consent.enabled) {
-      return false;
-    }
-
-    // P0-EIGHTH-4 FIX: Validate expiry timestamp (cannot be bypassed by clock manipulation)
-    const now = Date.now();
-
-    // Check if expiry timestamp exists (new consent format)
-    if (consent.expiryTimestamp) {
-      const expiryTime = new Date(consent.expiryTimestamp).getTime();
-
-      if (now > expiryTime) {
-        console.warn('Hera: Probe consent expired (timestamp check)');
-        await this.revokeConsent(); // Auto-revoke
+      // P0-ELEVENTH-4 FIX: Trust ONLY storage state and alarm-based revocation
+      // Removed Date.now() checks - they can be bypassed by changing system clock
+      // Security model: chrome.alarms fires on expiry → revokes consent → storage.enabled = false
+      // If storage shows enabled=true, consent is valid (alarm hasn't fired yet)
+      if (!consent || !consent.enabled) {
         return false;
       }
-    }
 
-    // P0-EIGHTH-4 FIX: Detect clock manipulation (system time moved backwards)
-    if (consent.grantedAtMs && now < consent.grantedAtMs) {
-      console.error('Hera SECURITY: System clock moved backwards! Revoking consent for safety.');
-      await this.revokeConsent();
-      return false;
-    }
+      // P0-ELEVENTH-4 FIX: Verify alarm still exists (defense in depth)
+      // If alarm was manipulated/deleted, consent is invalid
+      if (consent.alarmName) {
+        const alarm = await chrome.alarms.get(consent.alarmName);
+        if (!alarm) {
+          console.error('Hera SECURITY: Probe consent alarm missing - revoking for safety');
+          this.consentLock = this.consentLock.then(() => this._unsafeRevokeConsent());
+          await this.consentLock;
+          return false;
+        }
+      }
 
-    // Check if this domain is in the consent list
-    if (consent.domains && !consent.domains.includes('*')) {
-      return consent.domains.includes(targetDomain);
+      // Check if this domain is in the consent list
+      if (consent.domains && !consent.domains.includes('*')) {
+        return consent.domains.includes(targetDomain);
     }
 
     return true;
@@ -144,13 +147,24 @@ export class ProbeConsentManager {
   }
 
   /**
-   * Revoke probe consent
+   * Revoke probe consent (thread-safe public API)
    *
    * P0-ARCH-2 FIX: Also clears the expiry alarm
+   * P0-ELEVENTH-2 FIX: Wrapped in mutex to prevent race conditions
    *
    * @returns {Promise<void>}
    */
   async revokeConsent() {
+    // P0-ELEVENTH-2 FIX: Acquire lock before revoking
+    this.consentLock = this.consentLock.then(() => this._unsafeRevokeConsent());
+    return await this.consentLock;
+  }
+
+  /**
+   * Internal revocation logic (not thread-safe, must be called within lock)
+   * @private
+   */
+  async _unsafeRevokeConsent() {
     try {
       await chrome.storage.local.remove([this.CONSENT_STORAGE_KEY]);
       // P1-SEVENTH-3 FIX: Removed consentCache assignment

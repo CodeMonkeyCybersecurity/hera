@@ -170,15 +170,21 @@ export class MemoryManager {
     // Reason: onSuspend handler removed (doesn't work in MV3)
     // More aggressive syncing compensates for lack of final sync
 
-    // TODO P1-TENTH-6: 1-second debounce creates data loss window on service worker restart
-    // If worker terminates before timeout fires, all pending writes are lost permanently
-    // Should reduce to 100ms and add retry logic. See TENTH-REVIEW-FINDINGS.md:1739
+    // P1-TENTH-6 FIX: Reduce debounce to 100ms to minimize data loss window
+    // Service workers can be killed after 30s idle, 100ms is safer than 1000ms
     if (this._syncTimeout) clearTimeout(this._syncTimeout);
     this._syncTimeout = setTimeout(() => {
-      this._syncToStorage().catch(err =>
-        console.error('Hera: Background sync failed:', err)
-      );
-    }, 1000); // 1 second debounce
+      this._syncToStorage().catch(err => {
+        console.error('Hera: Background sync failed:', err);
+
+        // P1-TENTH-6 FIX: Retry once on failure
+        setTimeout(() => {
+          this._syncToStorage().catch(retryErr =>
+            console.error('Hera: Background sync retry failed:', retryErr)
+          );
+        }, 100);
+      });
+    }, 100); // Reduced from 1000ms to 100ms
   }
 
   // === ASYNC API (recommended for new code) ===

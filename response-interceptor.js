@@ -40,27 +40,35 @@
   }, RATE_LIMIT_WINDOW);
 
   // Check if domain is rate limited
-  // TODO P2-TENTH-1: Rate limit uses hostname, allowing subdomain bypass
-  // Attacker can use api1.evil.com, api2.evil.com to get 50x limit
-  // Should use base domain instead. See TENTH-REVIEW-FINDINGS.md:1971
-  //
-  // TODO P2-TENTH-2: domainInterceptCounts Map grows unbounded (memory leak)
-  // No max size limit, can grow to thousands of entries
-  // Should add max 500 entries with LRU eviction. See TENTH-REVIEW-FINDINGS.md:2025
   function checkRateLimit(url) {
     try {
-      const hostname = new URL(url, window.location.href).hostname;
+      const urlObj = new URL(url, window.location.href);
+
+      // P2-TENTH-1 FIX: Use base domain to prevent subdomain bypass
+      // Extract eTLD+1 (e.g., api1.evil.com → evil.com)
+      const parts = urlObj.hostname.split('.');
+      const baseDomain = parts.length >= 2 ? parts.slice(-2).join('.') : urlObj.hostname;
+
       const now = Date.now();
 
-      if (!domainInterceptCounts.has(hostname)) {
-        domainInterceptCounts.set(hostname, {
+      // P2-TENTH-2 FIX: Limit Map size to prevent memory leak
+      const MAX_RATE_LIMIT_ENTRIES = 500;
+      if (domainInterceptCounts.size >= MAX_RATE_LIMIT_ENTRIES && !domainInterceptCounts.has(baseDomain)) {
+        // Evict oldest entry (first in Map)
+        const oldestKey = domainInterceptCounts.keys().next().value;
+        domainInterceptCounts.delete(oldestKey);
+        console.warn(`Hera: Rate limit cache full, evicted ${oldestKey}`);
+      }
+
+      if (!domainInterceptCounts.has(baseDomain)) {
+        domainInterceptCounts.set(baseDomain, {
           count: 1,
           windowStart: now
         });
         return true;
       }
 
-      const data = domainInterceptCounts.get(hostname);
+      const data = domainInterceptCounts.get(baseDomain);
 
       // Reset window if expired
       if (now - data.windowStart > RATE_LIMIT_WINDOW) {
@@ -71,7 +79,7 @@
 
       // Check limit
       if (data.count >= RATE_LIMIT_PER_DOMAIN) {
-        console.warn(`Hera: Rate limit exceeded for ${hostname} (${data.count}/${RATE_LIMIT_PER_DOMAIN})`);
+        console.warn(`Hera: Rate limit exceeded for ${baseDomain} (${data.count}/${RATE_LIMIT_PER_DOMAIN})`);
         return false;
       }
 

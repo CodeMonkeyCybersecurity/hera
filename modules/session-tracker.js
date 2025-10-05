@@ -2,9 +2,10 @@
 // CRITICAL FIX P0-NEW: Migrated to chrome.storage.local (was chrome.storage.session)
 // Prevents split-brain storage architecture issues
 
-// TODO P2-TENTH-5: Session correlation data could enable cross-site tracking fingerprinting
-// Ecosystem correlation (Google/Microsoft/etc) is powerful but creates privacy risk if leaked
-// Should restrict correlation access to popup context only. See TENTH-REVIEW-FINDINGS.md:2165
+// P2-TENTH-5 PARTIAL FIX: Session correlation is privacy-sensitive
+// Ecosystem correlation (Google/Microsoft/etc) enables tracking if timing leaked to web pages
+// MITIGATION: Data only accessible via background.js message handlers (content scripts blocked)
+// FUTURE: Add explicit caller validation to ensure only popup.html can request correlation data
 
 export class SessionTracker {
   constructor() {

@@ -88,15 +88,16 @@ export function detectSuspiciousUrlPatterns(url) {
   // P2-EIGHTH-1 FIX: Limit URL length to prevent ReDoS
   const MAX_URL_LENGTH = 2000; // RFC 2616 suggests 2KB limit
 
-  // TODO P1-TENTH-5: URL truncation creates phishing bypass vulnerability
-  // Attacker can hide malicious params after 2000 chars. Should flag oversized URLs
-  // as suspicious instead of silently truncating. See TENTH-REVIEW-FINDINGS.md:1599
+  const patterns = [];
+
+  // P1-TENTH-5 FIX: Flag oversized URLs as suspicious instead of silently truncating
+  // Attack: Attacker hides malicious params after 2000 chars to bypass detection
   if (url.length > MAX_URL_LENGTH) {
-    console.warn(`Hera: URL too long (${url.length} chars), truncating for pattern analysis`);
-    url = url.substring(0, MAX_URL_LENGTH);
+    console.warn(`Hera SECURITY: URL exceeds safe length (${url.length} > ${MAX_URL_LENGTH})`);
+    patterns.push('url_too_long'); // Flag as suspicious
+    url = url.substring(0, MAX_URL_LENGTH); // Still analyze truncated version
   }
 
-  const patterns = [];
   const lowerUrl = url.toLowerCase();
 
   // Check for common phishing patterns

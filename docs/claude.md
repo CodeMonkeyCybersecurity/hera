@@ -23,9 +23,17 @@ in all parts of the browser and web applications accessed via the browser. It is
 
 - **No emojis** in code or documentation
 - **Prefer editing existing files** over creating new ones
-- **Documentation files only for strategic changes** - avoid creating unnecessary .md files
-- **Use inline comments for tactical notes** - inline notation is strongly preferred so documentation is available at the exact place in the code it is needed
+- **NEVER create .md files in project root** - This is a hard rule after 11 security reviews
+- **Use inline comments for tactical notes** - ALL findings, TODOs, and fixes go directly in source code
+- **Strategic docs only in docs/ folder** - README, architecture guides, setup instructions ONLY
+- **Security review findings** - Inline immediately with P0-REVIEW-N FIX: comments, then delete any .md
 - **Check conversation history first** - before addressing any topic, review previous conversations to see if we've discussed it and pick up where we most recently left off
+
+### Documentation Policy (Enforced)
+1. **Tactical = Inline**: Bug fixes, security issues, TODOs → inline comments in source
+2. **Strategic = docs/**: Architecture decisions, user guides → docs/ folder
+3. **Review findings**: Add summary to background.js header, inline all fixes, delete .md immediately
+4. **Zero cruft**: If a .md file exists in root, it should be inlined and deleted same session
 
 ## Working Relationship
 

@@ -54,27 +54,44 @@ async function loadProbeHistory() {
   const history = await probeConsentManager.getProbeHistory();
 
   if (history.length === 0) {
-    probeHistoryDiv.innerHTML = '<p style="color: #666;">No probes executed yet.</p>';
+    const emptyMsg = document.createElement('p');
+    emptyMsg.style.color = '#666';
+    emptyMsg.textContent = 'No probes executed yet.';
+    probeHistoryDiv.textContent = ''; // Clear
+    probeHistoryDiv.appendChild(emptyMsg);
     return;
   }
 
-  // TODO P2-TENTH-3: innerHTML with user-controlled probe data creates XSS vector
-  // entry.targetDomain could contain <script> if probe log is compromised
-  // Should use DOM methods (createElement/textContent). See TENTH-REVIEW-FINDINGS.md:2056
-  probeHistoryDiv.innerHTML = history.reverse().slice(0, 20).map(entry => {
-    const statusClass = entry.success ? 'success' : 'error';
-    const statusIcon = entry.success ? '✓' : '✗';
-    const date = new Date(entry.timestamp).toLocaleString();
+  // P2-TENTH-3 FIX: Use DOM methods instead of innerHTML to prevent XSS
+  // entry.targetDomain is user-controlled, could contain malicious HTML if storage compromised
+  probeHistoryDiv.textContent = ''; // Clear existing content
 
-    return `
-      <div class="log-entry">
-        <span class="${statusClass}">${statusIcon}</span>
-        <strong>${entry.probeType.toUpperCase()}</strong> →
-        ${entry.targetDomain} |
-        ${date}
-      </div>
-    `;
-  }).join('');
+  history.reverse().slice(0, 20).forEach(entry => {
+    const logEntry = document.createElement('div');
+    logEntry.className = 'log-entry';
+
+    const statusSpan = document.createElement('span');
+    statusSpan.className = entry.success ? 'success' : 'error';
+    statusSpan.textContent = entry.success ? '✓' : '✗';
+
+    const probeType = document.createElement('strong');
+    probeType.textContent = entry.probeType.toUpperCase();
+
+    const targetDomain = document.createTextNode(entry.targetDomain); // Safe - text node
+    const separator1 = document.createTextNode(' → ');
+    const separator2 = document.createTextNode(' | ');
+    const timestamp = document.createTextNode(new Date(entry.timestamp).toLocaleString());
+
+    logEntry.appendChild(statusSpan);
+    logEntry.appendChild(document.createTextNode(' '));
+    logEntry.appendChild(probeType);
+    logEntry.appendChild(separator1);
+    logEntry.appendChild(targetDomain);
+    logEntry.appendChild(separator2);
+    logEntry.appendChild(timestamp);
+
+    probeHistoryDiv.appendChild(logEntry);
+  });
 }
 
 // Clear history
