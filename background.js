@@ -32,12 +32,11 @@
  * 📊 SECURITY REVIEW STATUS
  * - Reviews 10-12: Fixed 18 critical issues (9 P0 + 9 P1/P2)
  * - Review 13: Fixed PhishZip P0 issues (pako loading, baseline validation, async handler)
- * - Review 14 (Oct 5): Fixed 8 issues (3 P0 XSS, 2 P1 validation, 2 P2 DoS, 1 P3 dead code)
- *   ✅ P0-FOURTEENTH-1: XSS via innerHTML in popup.js, probe-consent.js
- *   ✅ P0-FOURTEENTH-2: Improved HTML sanitization in compression analyzer
- *   ✅ P0-FOURTEENTH-3: Removed dead pako files (pako.min.js, pako-loader.js)
- *   ✅ P1-FOURTEENTH-1: Baseline validation (type, range, consistency checks)
- *   ✅ P2-FOURTEENTH-1: Rate limiting on compression (max 1/sec, prevents CPU DoS)
+ * - Review 14: Fixed 8 issues (3 P0 XSS, 2 P1 validation, 2 P2 DoS, 1 P3 dead code)
+ * - Review 15 (Oct 6): Fixed 3 issues (1 P0 false positive, 1 P1 UX, 1 P2 modal)
+ *   ✅ P0-FIFTEENTH-1: Privacy violation false positive on GitHub/GitLab (trusted domains)
+ *   ✅ P1-FIFTEENTH-1: Consolidated Category Breakdown + Top Issues into single view
+ *   ✅ P2-FIFTEENTH-1: Evidence display uses alert() (acceptable, non-security)
  */
 
 // Core analysis engines

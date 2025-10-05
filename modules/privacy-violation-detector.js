@@ -422,32 +422,38 @@ class PrivacyViolationDetector {
     }
 
     // PERFORMANCE FIX P1-2a: Check for data processing notice - filter visible forms only
-    const forms = this.filterVisible(document.querySelectorAll('form'));
-    for (const form of forms) {
-      const hasPersonalData = form.querySelector('input[type="email"], input[name*="email"], input[name*="name"], input[type="tel"]');
+    // P0-FIFTEENTH-1 FIX: Exclude trusted platforms (GitHub, GitLab) to reduce false positives
+    const trustedDomains = ['github.com', 'gitlab.com', 'bitbucket.org', 'npmjs.com'];
+    const isTrustedPlatform = trustedDomains.some(domain => window.location.hostname.includes(domain));
 
-      if (hasPersonalData) {
-        const formText = form.innerText.toLowerCase();
-        const hasDataNotice = formText.includes('privacy') ||
-                              formText.includes('personal data') ||
-                              formText.includes('how we use') ||
-                              formText.includes('data processing');
+    if (!isTrustedPlatform) {
+      const forms = this.filterVisible(document.querySelectorAll('form'));
+      for (const form of forms) {
+        const hasPersonalData = form.querySelector('input[type="email"], input[name*="email"], input[name*="name"], input[type="tel"]');
 
-        if (!hasDataNotice) {
-          findings.push({
-            type: 'privacy_violation',
-            category: 'missing_data_notice',
-            severity: 'high',
-            title: 'Form Lacks Data Processing Notice',
-            description: 'Form collects personal data without privacy notice',
-            evidence: {
-              formId: form.id,
-              formName: form.name,
-              gdprViolation: 'GDPR Article 13 - Must inform users about data processing'
-            },
-            recommendation: 'Include privacy notice near data collection forms',
-            timestamp: new Date().toISOString()
-          });
+        if (hasPersonalData) {
+          const formText = form.innerText.toLowerCase();
+          const hasDataNotice = formText.includes('privacy') ||
+                                formText.includes('personal data') ||
+                                formText.includes('how we use') ||
+                                formText.includes('data processing');
+
+          if (!hasDataNotice) {
+            findings.push({
+              type: 'privacy_violation',
+              category: 'missing_data_notice',
+              severity: 'high',
+              title: 'Form Lacks Data Processing Notice',
+              description: 'Form collects personal data without privacy notice',
+              evidence: {
+                formId: form.id,
+                formName: form.name,
+                gdprViolation: 'GDPR Article 13 - Must inform users about data processing'
+              },
+              recommendation: 'Include privacy notice near data collection forms',
+              timestamp: new Date().toISOString()
+            });
+          }
         }
       }
     }

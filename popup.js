@@ -4028,13 +4028,14 @@ class HeraDashboard {
     const scoreCard = this.createScoreCard(score);
     container.appendChild(scoreCard);
 
-    // 2. Category Breakdown
-    const categoryBreakdown = this.createCategoryBreakdown(score);
+    // 2. Category Breakdown (P1-FIFTEENTH-1: Now includes issues inline)
+    const categoryBreakdown = this.createCategoryBreakdown(score, findings);
     container.appendChild(categoryBreakdown);
 
-    // 3. Findings List
-    const findingsList = this.createFindingsList(findings, score);
-    container.appendChild(findingsList);
+    // 3. Findings List (P1-FIFTEENTH-1: Removed - redundant with inline category issues)
+    // User feedback: "consolidate Category Breakdown and Top Issues into one"
+    // const findingsList = this.createFindingsList(findings, score);
+    // container.appendChild(findingsList);
 
     // 4. Site Info
     const siteInfo = this.createSiteInfo(url, timestamp);
@@ -4109,37 +4110,39 @@ class HeraDashboard {
     return card;
   }
 
-  createCategoryBreakdown(score) {
+  // P1-FIFTEENTH-1 FIX: Consolidated Category Breakdown and Top Issues into one view
+  // Shows category scores WITH the actual issues for each category (user feedback: "see category issues and evidence all in one")
+  createCategoryBreakdown(score, allFindings = []) {
     const section = document.createElement('div');
     section.className = 'dashboard-section';
 
     const title = document.createElement('h3');
-    title.textContent = 'Category Breakdown';
+    title.textContent = 'Issues by Category';
     section.appendChild(title);
 
     const categories = document.createElement('div');
     categories.className = 'dashboard-categories';
 
-    // Sort categories by finding count
+    // Sort categories by finding count (show categories with issues first)
     const sortedCategories = Object.entries(score.categoryScores)
       .sort((a, b) => b[1].findingCount - a[1].findingCount);
 
-    for (const [name, data] of sortedCategories) {
+    for (const [categoryName, categoryData] of sortedCategories) {
       const categoryCard = document.createElement('div');
       categoryCard.className = 'category-card';
 
       const categoryHeader = document.createElement('div');
       categoryHeader.className = 'category-header';
 
-      const categoryName = document.createElement('div');
-      categoryName.className = 'category-name';
-      categoryName.textContent = this.formatCategoryName(name);
+      const categoryNameEl = document.createElement('div');
+      categoryNameEl.className = 'category-name';
+      categoryNameEl.textContent = this.formatCategoryName(categoryName);
 
       const categoryScore = document.createElement('div');
       categoryScore.className = 'category-score';
-      categoryScore.textContent = `${Math.round(data.score)}/100`;
+      categoryScore.textContent = `${Math.round(categoryData.score)}/100`;
 
-      categoryHeader.appendChild(categoryName);
+      categoryHeader.appendChild(categoryNameEl);
       categoryHeader.appendChild(categoryScore);
 
       const categoryBar = document.createElement('div');
@@ -4147,18 +4150,82 @@ class HeraDashboard {
 
       const categoryFill = document.createElement('div');
       categoryFill.className = 'category-fill';
-      categoryFill.style.width = `${data.score}%`;
-      categoryFill.style.backgroundColor = this.getScoreColor(data.score);
+      categoryFill.style.width = `${categoryData.score}%`;
+      categoryFill.style.backgroundColor = this.getScoreColor(categoryData.score);
 
       categoryBar.appendChild(categoryFill);
 
       const categoryFindings = document.createElement('div');
       categoryFindings.className = 'category-findings';
-      categoryFindings.textContent = `${data.findingCount} issue${data.findingCount !== 1 ? 's' : ''}`;
+      categoryFindings.textContent = `${categoryData.findingCount} issue${categoryData.findingCount !== 1 ? 's' : ''}`;
 
       categoryCard.appendChild(categoryHeader);
       categoryCard.appendChild(categoryBar);
       categoryCard.appendChild(categoryFindings);
+
+      // P1-FIFTEENTH-1: Add actual findings for this category (inline)
+      if (allFindings && allFindings.length > 0) {
+        const categoryIssues = allFindings.filter(f => f.category === categoryName);
+
+        if (categoryIssues.length > 0) {
+          const issuesList = document.createElement('div');
+          issuesList.className = 'category-issues-list';
+
+          // Sort by severity
+          const severityOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+          categoryIssues.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+
+          for (const issue of categoryIssues) {
+            const issueItem = document.createElement('div');
+            issueItem.className = `category-issue severity-${issue.severity}`;
+
+            const issueHeader = document.createElement('div');
+            issueHeader.className = 'issue-header-inline';
+
+            const severityBadge = document.createElement('span');
+            severityBadge.className = `severity-badge ${issue.severity}`;
+            severityBadge.textContent = issue.severity.toUpperCase();
+
+            const issueTitle = document.createElement('span');
+            issueTitle.className = 'issue-title-inline';
+            issueTitle.textContent = issue.title;
+
+            issueHeader.appendChild(severityBadge);
+            issueHeader.appendChild(issueTitle);
+
+            const issueDesc = document.createElement('div');
+            issueDesc.className = 'issue-description-inline';
+            issueDesc.textContent = issue.description;
+
+            if (issue.recommendation) {
+              const issueRec = document.createElement('div');
+              issueRec.className = 'issue-recommendation-inline';
+              issueRec.textContent = `→ ${issue.recommendation}`;
+              issueItem.appendChild(issueHeader);
+              issueItem.appendChild(issueDesc);
+              issueItem.appendChild(issueRec);
+            } else {
+              issueItem.appendChild(issueHeader);
+              issueItem.appendChild(issueDesc);
+            }
+
+            // Add evidence button
+            if (issue.evidence) {
+              const evidenceBtn = document.createElement('button');
+              evidenceBtn.className = 'evidence-btn-inline';
+              evidenceBtn.textContent = '🔍 View Evidence';
+              evidenceBtn.onclick = () => {
+                alert(JSON.stringify(issue.evidence, null, 2));
+              };
+              issueItem.appendChild(evidenceBtn);
+            }
+
+            issuesList.appendChild(issueItem);
+          }
+
+          categoryCard.appendChild(issuesList);
+        }
+      }
 
       categories.appendChild(categoryCard);
     }
