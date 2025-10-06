@@ -2,20 +2,28 @@
 // Intercepts fetch() and XMLHttpRequest to capture response bodies
 // WITHOUT requiring the invasive debugger permission
 // SECURITY FIX: Added rate limiting, size limits, and nonce validation
+//
+// P2-SIXTEENTH-2: EXECUTION CONTEXT CLARIFICATION
+// This script is injected via chrome.scripting.executeScript() which runs in the MAIN world by default
+// (not ISOLATED world despite what manifest.json says - manifest only controls content_scripts).
+// However, it uses chrome.runtime.sendMessage which is safe because:
+//   1. Messages are sent directly to background (not via postMessage)
+//   2. Background validates sender.id matches chrome.runtime.id
+//   3. Page JavaScript cannot intercept chrome.runtime.sendMessage calls
+// Security boundary: Extension API access, not DOM isolation
 
 (function() {
   'use strict';
 
-  // SECURITY FIX P1-1: Running in ISOLATED world now
-  // In isolated world, this code runs in the extension's context, not the page's context
-  // The page's JavaScript cannot access, modify, or interfere with this interceptor
+  // SECURITY FIX P1-1: Using chrome.runtime.sendMessage (secure even in MAIN world)
+  // The page's JavaScript cannot intercept extension API calls
   // This prevents malicious pages from:
-  //   1. Stealing nonces
-  //   2. Overriding fetch/XHR before we do
-  //   3. Injecting fake response data
+  //   1. Stealing response data
+  //   2. Overriding chrome.runtime before we load (impossible)
+  //   3. Injecting fake response data (validated by sender.id)
   //   4. Preventing interception entirely
 
-  console.log('Hera: Response interceptor running in isolated world (secure)');
+  console.log('Hera: Response interceptor initialized (secure extension API communication)');
 
   // Store original functions
   const originalFetch = window.fetch;

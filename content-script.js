@@ -158,23 +158,23 @@ async function loadDetectors() {
   window.__HERA_INJECTION_NONCE__ = injectionNonce;
 
   // Request background script to inject interceptor in isolated world
+  // P1-SIXTEENTH-1 FIX: CSP failures are expected on many sites - don't log errors
   chrome.runtime.sendMessage({
     type: 'INJECT_RESPONSE_INTERCEPTOR',
     nonce: injectionNonce,
     tabId: null // Background will use sender.tab.id
   }).then(response => {
     if (response?.success) {
-      console.log('Hera: Response interceptor injected in isolated world');
+      if (DEBUG) console.log('Hera: Response interceptor injected in isolated world');
     } else {
-      // CRITICAL FIX: Interceptor injection is optional - don't warn for permission issues
-      if (response?.error && !response.error.includes('permission')) {
-        console.warn('Hera: Failed to inject response interceptor:', response?.error);
-      } else {
-        console.log('Hera: Response interceptor not available (permissions needed)');
+      // P1-SIXTEENTH-1 FIX: Downgrade to debug log - CSP blocking is normal and expected
+      if (DEBUG && response?.error) {
+        console.log('Hera: Response interceptor not injected:', response.error);
       }
     }
   }).catch(error => {
-    console.error('Hera: Error requesting interceptor injection:', error);
+    // P1-SIXTEENTH-1 FIX: Only log if DEBUG enabled - CSP errors are expected
+    if (DEBUG) console.log('Hera: Error requesting interceptor injection:', error.message);
   });
 })();
 
@@ -1459,8 +1459,11 @@ async function runComprehensiveAnalysis() {
         });
 
       } catch (error) {
-        console.warn('Hera: Failed to load reputation overlay:', error.message);
-        console.warn('Hera: Reputation display unavailable (CSP may be blocking injection)');
+        // P1-SIXTEENTH-1 FIX: Downgrade CSP errors to debug log - expected behavior on protected sites
+        if (DEBUG) {
+          console.log('Hera: Reputation overlay not injected:', error.message);
+          console.log('Hera: Overlay injection blocked (likely by CSP)');
+        }
         // Continue without overlay - analysis still completed successfully
       }
     }

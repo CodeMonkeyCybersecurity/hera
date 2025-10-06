@@ -110,8 +110,12 @@ class DarkPatternDetector {
     let bodyText = document.body.innerText.toLowerCase();
 
     // P1-NINTH-2 FIX: Truncate long text to prevent ReDoS
+    // P2-SIXTEENTH-1 FIX: Log once per domain, not per call (prevents console spam)
     if (bodyText.length > MAX_TEXT_LENGTH) {
-      console.warn(`Hera: Truncating long body text (${bodyText.length} chars) to prevent ReDoS`);
+      if (!this._truncationLogged) {
+        console.log(`Hera: Truncating long body text (${bodyText.length} chars) to prevent ReDoS`);
+        this._truncationLogged = true;  // Only log once per instance
+      }
       bodyText = bodyText.substring(0, MAX_TEXT_LENGTH);
     }
 

@@ -67,14 +67,34 @@ export class MemoryManager {
     if (this._pendingWrites.has('sync')) return;
     this._pendingWrites.add('sync');
 
+    // P0-SIXTEENTH-2 FIX: Circuit breaker - stop syncing after 3 consecutive failures
+    if (!this._syncFailureCount) this._syncFailureCount = 0;
+    if (this._syncFailureCount >= 3) {
+      console.error('Hera: Sync circuit breaker OPEN - too many failures, stopping writes');
+      this._pendingWrites.delete('sync');
+      return;
+    }
+
     try {
       await this.initPromise; // Ensure initialized
 
-      // Check quota before writing
-      const estimatedSize = this._estimateStorageSize();
-      if (estimatedSize > this.STORAGE_QUOTA_BYTES * this.QUOTA_WARNING_THRESHOLD) {
-        console.warn(`Hera: Storage approaching quota (${(estimatedSize / 1024 / 1024).toFixed(2)}MB / 10MB)`);
+      // P0-SIXTEENTH-2 FIX: Check ACTUAL quota before writing (not just estimated)
+      const bytesInUse = await chrome.storage.local.getBytesInUse();
+      const quota = chrome.storage.local.QUOTA_BYTES || 10485760; // 10MB
+      const usagePercent = bytesInUse / quota;
+
+      if (usagePercent > this.QUOTA_WARNING_THRESHOLD) {
+        console.warn(`Hera: Storage at ${(usagePercent * 100).toFixed(1)}% - forcing cleanup BEFORE write`);
         await this._performQuotaCleanup();
+      }
+
+      // P0-SIXTEENTH-2 FIX: If still over 95%, refuse to write
+      const bytesAfterCleanup = await chrome.storage.local.getBytesInUse();
+      if (bytesAfterCleanup / quota > 0.95) {
+        console.error('Hera: Storage quota critical (>95%), skipping sync to prevent quota exhaustion');
+        this._syncFailureCount++;
+        this._pendingWrites.delete('sync');
+        return;
       }
 
       // Convert Maps to plain objects for storage
@@ -86,14 +106,19 @@ export class MemoryManager {
         authRequests: authRequestsObj,
         debugTargets: debugTargetsObj
       });
+
+      // P0-SIXTEENTH-2 FIX: Reset failure count on success
+      this._syncFailureCount = 0;
     } catch (error) {
       if (error.message?.includes('QUOTA_BYTES')) {
-        console.error('Hera: Storage quota exceeded, forcing cleanup');
+        console.error('Hera: Storage quota exceeded, forcing aggressive cleanup');
+        this._syncFailureCount++;
         await this._performQuotaCleanup();
-        // Retry after cleanup
-        await this._syncToStorage();
+        // P0-SIXTEENTH-2 FIX: Do NOT retry immediately - causes infinite loop
+        // Next syncWrite() will attempt again
       } else {
         console.error('Hera: Failed to sync to storage:', error);
+        this._syncFailureCount++;
       }
     } finally {
       this._pendingWrites.delete('sync');
@@ -166,12 +191,15 @@ export class MemoryManager {
 
   // Sync writes trigger background persistence
   syncWrite() {
-    // SECURITY FIX P3-NEW: Reduced debounce from 100ms to 1000ms
-    // Reason: onSuspend handler removed (doesn't work in MV3)
-    // More aggressive syncing compensates for lack of final sync
+    // P3-SIXTEENTH-2: DEBOUNCE TIMING RATIONALE
+    // 100ms chosen to balance:
+    //   1. Data loss risk - Service workers killed after 30s idle, 100ms minimizes loss window
+    //   2. Storage API performance - chrome.storage.local.set() takes ~5-20ms
+    //   3. Write coalescing - Multiple rapid writes batched into single storage operation
+    //   4. Quota exhaustion - Fewer writes = less quota pressure
+    // Alternative: 1000ms (used by alert-manager, evidence-collector) prioritizes quota over data loss
+    // Choice depends on criticality: auth requests (100ms) vs alert history (1000ms)
 
-    // P1-TENTH-6 FIX: Reduce debounce to 100ms to minimize data loss window
-    // Service workers can be killed after 30s idle, 100ms is safer than 1000ms
     if (this._syncTimeout) clearTimeout(this._syncTimeout);
     this._syncTimeout = setTimeout(() => {
       this._syncToStorage().catch(err => {
@@ -184,7 +212,7 @@ export class MemoryManager {
           );
         }, 100);
       });
-    }, 100); // Reduced from 1000ms to 100ms
+    }, 100); // 100ms - see rationale above
   }
 
   // === ASYNC API (recommended for new code) ===

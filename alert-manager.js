@@ -44,21 +44,37 @@ class AlertManager {
   async _syncToStorage() {
     try {
       await this.initPromise;
+
+      // P0-SIXTEENTH-2 FIX: Check quota before writing
+      const bytesInUse = await chrome.storage.local.getBytesInUse();
+      const quota = chrome.storage.local.QUOTA_BYTES || 10485760;
+      if (bytesInUse / quota > 0.90) {
+        console.warn('Hera: Alert history sync skipped - quota >90%');
+        return;
+      }
+
       const historyObj = Object.fromEntries(this._alertHistory.entries());
       // CRITICAL FIX P0: Use chrome.storage.local (survives browser restart)
       await chrome.storage.local.set({ heraAlertHistory: historyObj });
     } catch (error) {
-      console.error('Hera: Failed to sync alert history:', error);
+      if (error.message?.includes('QUOTA')) {
+        console.error('Hera: Alert history quota exceeded, forcing cleanup');
+        this.cleanupAlertHistory();
+      } else {
+        console.error('Hera: Failed to sync alert history:', error);
+      }
     }
   }
 
   _debouncedSync() {
-    // SECURITY FIX P3-NEW: Reduced debounce from 100ms to 1000ms
-    // Compensates for removed onSuspend handler
+    // P3-SIXTEENTH-2: DEBOUNCE TIMING - 1000ms (vs memory-manager's 100ms)
+    // Alert history is low-priority data (used only for deduplication)
+    // Longer debounce reduces storage quota pressure
+    // Acceptable data loss: Worst case = duplicate alerts shown after browser restart
     if (this._syncTimeout) clearTimeout(this._syncTimeout);
     this._syncTimeout = setTimeout(() => {
       this._syncToStorage().catch(err => console.error('Alert history sync failed:', err));
-    }, 1000); // 1 second debounce
+    }, 1000); // 1 second debounce - see rationale above
   }
 
   get alertHistory() {

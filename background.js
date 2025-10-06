@@ -33,10 +33,16 @@
  * - Reviews 10-12: Fixed 18 critical issues (9 P0 + 9 P1/P2)
  * - Review 13: Fixed PhishZip P0 issues (pako loading, baseline validation, async handler)
  * - Review 14: Fixed 8 issues (3 P0 XSS, 2 P1 validation, 2 P2 DoS, 1 P3 dead code)
- * - Review 15 (Oct 6): Fixed 3 issues (1 P0 false positive, 1 P1 UX, 1 P2 modal)
- *   ✅ P0-FIFTEENTH-1: Privacy violation false positive on GitHub/GitLab (trusted domains)
- *   ✅ P1-FIFTEENTH-1: Consolidated Category Breakdown + Top Issues into single view
- *   ✅ P2-FIFTEENTH-1: Evidence display uses alert() (acceptable, non-security)
+ * - Review 15: Fixed 3 issues (1 P0 false positive, 1 P1 UX, 1 P2 modal)
+ * - Review 16 (Oct 6): Fixed 10 issues from production error logs
+ *   ✅ P0-SIXTEENTH-1: Message authorization bug (INJECT_RESPONSE_INTERCEPTOR, getBackendScan unauthorized)
+ *   ✅ P0-SIXTEENTH-2: Storage quota exhaustion (circuit breaker, pre-write quota checks, startup cleanup)
+ *   ✅ P0-SIXTEENTH-3: pako.js initialization race (initializeHera() startup coordinator)
+ *   ✅ P1-SIXTEENTH-1: CSP injection failures (downgraded to debug logs - expected behavior)
+ *   ✅ P2-SIXTEENTH-1: Redundant truncation logging (log once per instance)
+ *   ✅ P2-SIXTEENTH-3: Broken encryption imports removed (secure-storage.js deprecated)
+ *   ✅ P3-SIXTEENTH-1: Dead code in manifest.json (empty web_accessible_resources removed)
+ *   ✅ P3-SIXTEENTH-2: Documented debounce timing rationale (100ms vs 1000ms tradeoffs)
  */
 
 // Core analysis engines
@@ -1037,11 +1043,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // P0-EIGHTH-3 FIX: Content scripts can ONLY send specific whitelisted messages
   const contentScriptAllowedActions = [
     'responseIntercepted', // Content script sends this (response interceptor)
+    'getBackendScan',      // P0-SIXTEENTH-1 FIX: Content script requests backend scan results
     'ANALYSIS_ERROR',      // Content script reports errors
     'INJECT_RESPONSE_INTERCEPTOR' // Content script requests injection
   ];
 
   // P0-EIGHTH-3 FIX: Check authorization for all actions
+  // P0-SIXTEENTH-1 FIX: Add getBackendScan to allowed actions (sent by content-script.js:231)
   if (!isAuthorizedSender && !contentScriptAllowedActions.includes(messageType)) {
     console.error(`Hera SECURITY: Unauthorized message from ${senderUrl}: ${messageType}`);
     sendResponse({ success: false, error: 'Unauthorized sender' });
@@ -2867,11 +2875,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const isAuthorizedSender = allowedSenderUrls.some(allowed => senderUrl.startsWith(allowed));
 
   // P1-EIGHTH-2 FIX: Content scripts can only send specific type-based messages
+  // P0-SIXTEENTH-1 FIX: Add INJECT_RESPONSE_INTERCEPTOR to allowed types (it's sent by content-script.js:162)
   const contentScriptAllowedTypes = [
     'ANALYSIS_COMPLETE',
     'ANALYSIS_ERROR',
     'GET_SITE_ANALYSIS',
-    'TRIGGER_ANALYSIS'
+    'TRIGGER_ANALYSIS',
+    'INJECT_RESPONSE_INTERCEPTOR'  // P0-SIXTEENTH-1 FIX: Content script requests interceptor injection
   ];
 
   if (!isAuthorizedSender && message.type && !contentScriptAllowedTypes.includes(message.type)) {
@@ -3214,5 +3224,36 @@ async function handleTriggerAnalysis() {
     return { error: error.message };
   }
 }
+
+// P0-SIXTEENTH-2 FIX: Run cleanup on startup to prevent quota exhaustion
+// P0-SIXTEENTH-3 FIX: Initialize compression analyzer
+async function initializeHera() {
+  console.log('Hera: Initializing all systems...');
+
+  try {
+    // 1. Initialize compression analyzer (P0-SIXTEENTH-3)
+    await compressionAnalyzer.initialize();
+    compressionAnalyzerReady = true;
+    console.log('Hera: Compression analyzer ready');
+  } catch (error) {
+    console.error('Hera: Compression analyzer failed to initialize:', error);
+  }
+
+  // 2. Run cleanup to free quota (P0-SIXTEENTH-2)
+  try {
+    await memoryManager.cleanupStaleRequests();
+    await heraAlertManager.cleanupAlertHistory();
+    const bytesInUse = await chrome.storage.local.getBytesInUse();
+    const quota = chrome.storage.local.QUOTA_BYTES || 10485760;
+    console.log(`Hera: Storage quota ${(bytesInUse / 1024).toFixed(0)}KB / ${(quota / 1024).toFixed(0)}KB (${((bytesInUse / quota) * 100).toFixed(1)}%)`);
+  } catch (error) {
+    console.error('Hera: Startup cleanup failed:', error);
+  }
+
+  console.log('Hera: All systems initialized');
+}
+
+// Run initialization
+initializeHera();
 
 console.log('Hera: All-in-one detection system loaded (analysis runs in content script)');

@@ -77,6 +77,20 @@ class EvidenceCollector {
     try {
       await this.initPromise;
 
+      // P0-SIXTEENTH-2 FIX: Check quota before writing
+      const bytesInUse = await chrome.storage.local.getBytesInUse();
+      const quota = chrome.storage.local.QUOTA_BYTES || 10485760;
+      if (bytesInUse / quota > 0.90) {
+        console.warn('Hera: Evidence sync skipped - quota >90%, cleaning up first');
+        await this._performCleanup();
+        // Check again after cleanup
+        const bytesAfter = await chrome.storage.local.getBytesInUse();
+        if (bytesAfter / quota > 0.95) {
+          console.error('Hera: Evidence sync aborted - quota still >95% after cleanup');
+          return;
+        }
+      }
+
       const evidence = {
         responseCache: Object.fromEntries(this._responseCache.entries()),
         flowCorrelation: Object.fromEntries(this._flowCorrelation.entries()),
@@ -93,7 +107,7 @@ class EvidenceCollector {
       });
     } catch (error) {
       if (error.message?.includes('QUOTA')) {
-        console.warn('Hera: Evidence quota exceeded, cleaning up');
+        console.error('Hera: Failed to sync evidence: Error: Resource::kQuotaBytes quota exceeded');
         await this._performCleanup();
       } else {
         console.error('Hera: Failed to sync evidence:', error);
@@ -116,12 +130,14 @@ class EvidenceCollector {
   }
 
   _debouncedSync() {
-    // SECURITY FIX P3-NEW: Reduced debounce from 200ms to 1000ms
-    // Compensates for removed onSuspend handler
+    // P3-SIXTEENTH-2: DEBOUNCE TIMING - 1000ms (vs memory-manager's 100ms)
+    // Evidence collection is medium-priority (used for vulnerability reports)
+    // Longer debounce reduces quota pressure from storing large response bodies
+    // Acceptable data loss: Response bodies lost if browser crashes (auth requests still persisted)
     if (this._syncTimeout) clearTimeout(this._syncTimeout);
     this._syncTimeout = setTimeout(() => {
       this._syncToStorage().catch(err => console.error('Evidence sync failed:', err));
-    }, 1000); // 1 second debounce
+    }, 1000); // 1 second debounce - see rationale above
   }
 
   // Getters for backward compatibility

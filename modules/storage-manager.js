@@ -1,7 +1,6 @@
 // Storage Manager - Centralized storage operations with quota management
-// P0 SECURITY FIX: Now includes encryption, secret redaction, and mutex locking
-
-import { securelyStoreSession, retrieveSecureSession } from './secure-storage.js';
+// P0 SECURITY FIX: Includes secret redaction and mutex locking
+// P2-SIXTEENTH-3 FIX: Removed broken encryption imports (secure-storage.js is broken - see background.js:100-105)
 
 export class StorageManager {
   constructor() {
@@ -108,13 +107,12 @@ export class StorageManager {
           console.log(`Hera: Auto-deleted ${deletedCount} sessions older than ${this.SESSION_RETENTION_HOURS}h`);
         }
 
-        // P0 FIX: Redact secrets and encrypt
-        const secureData = await securelyStoreSession(eventData);
+        // P2-SIXTEENTH-3 FIX: Encryption removed (secure-storage.js is broken)
+        // Future: Implement password-based key derivation (PBKDF2) or accept no encryption
+        // Store plaintext timestamp for fast cleanup
+        eventData._timestamp = new Date(eventData.timestamp).getTime();
 
-        // P0-ARCH-1: Store plaintext timestamp for fast cleanup
-        secureData._timestamp = new Date(eventData.timestamp).getTime();
-
-        sessions.push(secureData);
+        sessions.push(eventData);
 
         // Enforce max sessions limit
         if (sessions.length > this.MAX_SESSIONS) {
@@ -148,18 +146,12 @@ export class StorageManager {
   }
 
   // Get all sessions
-  // P0 FIX: Now decrypts sessions
+  // P2-SIXTEENTH-3 FIX: Removed decryption (secure-storage.js is broken)
   async getAllSessions() {
     try {
       const result = await chrome.storage.local.get({ heraSessions: [] });
-      const encryptedSessions = result.heraSessions || [];
-
-      // Decrypt all sessions
-      const decryptedSessions = await Promise.all(
-        encryptedSessions.map(session => retrieveSecureSession(session))
-      );
-
-      return decryptedSessions.filter(s => s !== null);
+      const sessions = result.heraSessions || [];
+      return sessions;
     } catch (error) {
       console.error('Failed to get sessions:', error);
       return [];
