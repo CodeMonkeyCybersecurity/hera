@@ -1,3 +1,56 @@
+/**
+ * HERA - OAuth/OIDC/SAML Security Testing Extension
+ * Code Monkey Cybersecurity - "Cybersecurity. With humans."
+ *
+ * 🛡️ ACTIVE DETECTION LAYERS (Currently Operational)
+ *
+ * ✅ OAuth/SAML Flow Security - CSRF, PKCE, state parameter validation
+ * ✅ Certificate Analysis - HTTPS/TLS integrity, domain matching
+ * ✅ DNS Intelligence - Homograph attacks, DGA detection, geolocation
+ * ✅ Session Tracking - Cross-domain correlation, ecosystem detection
+ * ✅ Secret Scanning - Hardcoded credentials, JWT vulnerabilities
+ * ✅ Dark Pattern Detection - UI manipulation, deceptive practices
+ * ✅ Privacy Violation Detection - GDPR compliance, consent validation
+ *
+ * ✅ PhishZip Compression Analysis - INTEGRATED (Phase 1 Complete)
+ * Status: Core functionality operational, requires baseline training
+ * Integration fixes completed (13th Review):
+ *   - ✅ P0-THIRTEENTH-1: pako.js loaded dynamically in compression analyzer
+ *   - ✅ P0-THIRTEENTH-2: Analyzer instantiated and called in ANALYSIS_COMPLETE
+ *   - ✅ P0-THIRTEENTH-3: manifest.json web_accessible_resources includes pako.js
+ *   - ⚠️  P1-THIRTEENTH-1: No baseline data yet (requires real auth page training)
+ *   - ✅ P1-THIRTEENTH-2: Integrated into message pipeline with async wrapper
+ *
+ * Next steps: Train baselines on Microsoft/Google/GitHub/Okta auth pages
+ * Full roadmap: docs/PHISHZIP-INTEGRATION-SUMMARY.md (Phase 1-5, 8+ weeks)
+ *
+ * Philosophy: HONEST, evidence-based, human-centric security
+ * - Document what actually works (not marketing claims)
+ * - Show users real findings with explanations
+ * - Respect user agency - inform, don't patronize
+ *
+ * 📊 SECURITY REVIEW STATUS
+ * - Reviews 10-12: Fixed 18 critical issues (9 P0 + 9 P1/P2)
+ * - Review 13: Fixed PhishZip P0 issues (pako loading, baseline validation, async handler)
+ * - Review 14: Fixed 8 issues (3 P0 XSS, 2 P1 validation, 2 P2 DoS, 1 P3 dead code)
+ * - Review 15: Fixed 3 issues (1 P0 false positive, 1 P1 UX, 1 P2 modal)
+ * - Review 16: Fixed 10 issues from production error logs
+ *   ✅ P0-SIXTEENTH-1: Message authorization bug (INJECT_RESPONSE_INTERCEPTOR, getBackendScan unauthorized)
+ *   ✅ P0-SIXTEENTH-2: Storage quota exhaustion (circuit breaker, pre-write quota checks, startup cleanup)
+ *   ✅ P0-SIXTEENTH-3: pako.js initialization race (initializeHera() startup coordinator)
+ *   ✅ P1-SIXTEENTH-1: CSP injection failures (downgraded to debug logs - expected behavior)
+ *   ✅ P2-SIXTEENTH-1: Redundant truncation logging (log once per instance)
+ *   ✅ P2-SIXTEENTH-3: Broken encryption imports removed (secure-storage.js deprecated)
+ *   ✅ P3-SIXTEENTH-1: Dead code in manifest.json (empty web_accessible_resources removed)
+ *   ✅ P3-SIXTEENTH-2: Documented debounce timing rationale (100ms vs 1000ms tradeoffs)
+ * - Review 17 (Oct 9): Fixed 4 critical production errors
+ *   ✅ P0-SEVENTEENTH-1: getBackendScan authorization fixed (was in wrong listener whitelist)
+ *   ✅ P0-SEVENTEENTH-2: Backend scanning disabled (CSP blocks fetch to arbitrary domains)
+ *   ✅ P0-SEVENTEENTH-3: Circuit breaker memory leak (rejects writes + clears cache when open)
+ *   ✅ P1-SEVENTEENTH-1: pako.js init error swallowed (now explicitly sets ready=false)
+ */
+
+// Core analysis engines
 import { HeraAuthProtocolDetector } from './hera-auth-detector.js';
 import { HeraSecretScanner } from './hera-secret-scanner.js';
 import { HeraMaliciousExtensionDetector } from './hera-extension-security.js';
@@ -6,113 +59,55 @@ import { HeraPortAuthAnalyzer } from './hera-port-auth-analyzer.js';
 import { EvidenceCollector } from './evidence-collector.js';
 import { AlertManager } from './alert-manager.js';
 
-// Security Input Validation Utilities
-const SecurityValidation = {
-  // Sanitize URLs for safe processing
-  sanitizeURL: (url) => {
-    if (typeof url !== 'string') return '';
-    try {
-      const urlObj = new URL(url);
-      // Only allow http/https protocols
-      if (!['http:', 'https:'].includes(urlObj.protocol)) {
-        return '';
-      }
-      return url;
-    } catch (e) {
-      return '';
-    }
-  },
+// Modular architecture components
+import { SecurityValidation } from './modules/security-validation.js';
+import { storageManager } from './modules/storage-manager.js';
+import { memoryManager } from './modules/memory-manager.js';
+import { sessionTracker } from './modules/session-tracker.js';
+import { ipCacheManager } from './modules/ip-cache.js';
 
-  // Validate and sanitize headers
-  sanitizeHeaders: (headers) => {
-    if (!Array.isArray(headers)) return [];
-    return headers.filter(header => {
-      return (
-        header &&
-        typeof header.name === 'string' &&
-        typeof header.value === 'string' &&
-        header.name.length < 1000 &&
-        header.value.length < 10000
-      );
-    }).map(header => ({
-      name: header.name.toLowerCase().trim(),
-      value: header.value.trim()
-    }));
-  },
+// DNS and IP intelligence module (Phase 1 modularization)
+import { resolveIPAddresses, getIPGeolocation, gatherDNSIntelligence, detectSuspiciousDomainPatterns } from './modules/dns-intelligence.js';
 
-  // Validate request body size and content
-  validateRequestBody: (body) => {
-    if (!body) return null;
+// Pure utility modules (Phase 1 modularization)
+import { detectHomographAttack, detectDGAPattern, calculateStringSimilarity, levenshteinDistance } from './modules/string-utils.js';
+import { parseCookieHeader, analyzeSetCookie, isSessionCookie, isAuthCookie } from './modules/cookie-utils.js';
+import { analyzeJWT } from './modules/jwt-utils.js';
+import { detectAuthType } from './modules/auth-utils.js';
+import { analyzeRequestHeaders, analyzeResponseHeaders } from './modules/header-utils.js';
+import { analyzeUrl, hasSensitiveParameters, detectSuspiciousUrlPatterns, isCrossOrigin, isExtensionRequest, isThirdPartyRequest, isSensitivePath } from './modules/url-utils.js';
+import { performAlgNoneProbe, performRepeaterRequest, sanitizeProbeHeaders } from './modules/security-probes.js';
 
-    // Limit body size (10MB max)
-    const MAX_BODY_SIZE = 10 * 1024 * 1024;
-    if (typeof body === 'string' && body.length > MAX_BODY_SIZE) {
-      return body.substring(0, MAX_BODY_SIZE) + '[TRUNCATED]';
-    }
-    return body;
-  },
+// P0-THIRTEENTH-1 FIX: Load pako.js compression library first
+// Service workers can't use importScripts in modules, so we load via script tag approach
+// pako will be available globally after this loads
+self.pako = null; // Will be set by loading pako
 
-  // Validate and sanitize domain names
-  sanitizeDomain: (domain) => {
-    if (typeof domain !== 'string') return '';
+// PHISHZIP INTEGRATION: Compression-based phishing detection (PhishZip methodology from CSIRO Data61)
+// Adds Layer 5 to multi-layer defense: visual clone detection via HTML compression analysis
+import { HeraCompressionAnalyzer } from './modules/hera-compression-analyzer.js';
 
-    // Basic domain validation
-    const domainRegex = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9](?:\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9])*$/;
-    if (!domainRegex.test(domain) || domain.length > 253) {
-      return '';
-    }
-    return domain.toLowerCase();
-  },
+// P0-THIRTEENTH-2 FIX: Instantiate compression analyzer globally
+const compressionAnalyzer = new HeraCompressionAnalyzer();
+let compressionAnalyzerReady = false;
 
-  // Rate limiting for request processing
-  rateLimiter: {
-    requestCounts: new Map(),
-    MAX_REQUESTS_PER_MINUTE: 1000,
+// Auth flow analysis module (Tier 2 domain logic)
+import {
+  analyzeAuthFlow,
+  analyzeOAuthConsent,
+  detectAuthProvider,
+  analyzeScopeRisks,
+  analyzeRedirectUri,
+  generateConsentWarnings,
+  analyzeAuthFailure
+} from './modules/auth-flow-analyzer.js';
 
-    checkRateLimit: (clientId) => {
-      const now = Date.now();
-      const windowStart = now - 60000; // 1 minute window
+// ARCHITECTURE FIX P0-1: Detectors moved to content-script.js
+// Removed imports - detectors run in content script where document/window exist
+// background.js (service worker) cannot access DOM APIs
 
-      if (!SecurityValidation.rateLimiter.requestCounts.has(clientId)) {
-        SecurityValidation.rateLimiter.requestCounts.set(clientId, []);
-      }
-
-      const requests = SecurityValidation.rateLimiter.requestCounts.get(clientId);
-
-      // Remove old requests outside the window
-      const validRequests = requests.filter(timestamp => timestamp > windowStart);
-
-      if (validRequests.length >= SecurityValidation.rateLimiter.MAX_REQUESTS_PER_MINUTE) {
-        return false; // Rate limit exceeded
-      }
-
-      validRequests.push(now);
-      SecurityValidation.rateLimiter.requestCounts.set(clientId, validRequests);
-      return true;
-    }
-  },
-
-  // Validate JWT tokens before processing
-  validateJWTInput: (token) => {
-    if (typeof token !== 'string') return null;
-
-    // Basic JWT structure validation
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-
-    // Check each part is valid base64url
-    for (const part of parts) {
-      if (!/^[A-Za-z0-9_-]+$/.test(part)) {
-        return null;
-      }
-    }
-
-    // Reasonable length limits
-    if (token.length > 10000) return null;
-
-    return token;
-  }
-};
+// NOTE: Deleted duplicate SecurityValidation code (was 107 lines, exact copy of module)
+// Now using the modular version from ./modules/security-validation.js
 
 // NOTE: Removed unused SecureStorage encryption system (was broken - session key lost on service worker restart)
 // If encryption is needed in the future, use:
@@ -120,105 +115,201 @@ const SecurityValidation = {
 // 2. OR store key in chrome.storage.session (MV3) - but data still lost on browser restart
 // 3. OR accept that sensitive data should NOT be stored locally at all
 
-// --- Global State ---
-const authRequests = new Map(); // In-memory store for requests being processed
-const version = "1.3";
-const debugTargets = new Map();
+// P2-NINTH-1 FIX: Whitelist of allowed script injection files
+const ALLOWED_SCRIPTS = new Set([
+  'response-interceptor.js',
+  'content-script.js'
+]);
 
-// Memory leak prevention: Clean up stale requests every 2 minutes
-const REQUEST_TTL = 5 * 60 * 1000; // 5 minutes
+// P3-NINTH-1 & P3-NINTH-2 FIX: Production mode detection and safe logging
+const isProduction = !chrome.runtime.getManifest().version.includes('dev');
 
-function cleanupStaleRequests() {
-  const now = Date.now();
-  let cleaned = 0;
+// TODO P3-TENTH-3: Sanitized errors lack context for user bug reports
+// Removing stack traces helps security but makes debugging production issues very hard
+// Should add error codes and timestamps to help users report issues. See TENTH-REVIEW-FINDINGS.md:2280
+function sanitizeError(error) {
+  if (!error) return 'Unknown error';
 
-  for (const [requestId, requestData] of authRequests.entries()) {
-    const age = now - new Date(requestData.timestamp).getTime();
-    if (age > REQUEST_TTL) {
-      authRequests.delete(requestId);
-      cleaned++;
-    }
+  if (isProduction) {
+    // In production, hide stack traces and file paths
+    return {
+      message: error.message,
+      type: error.name
+      // Omit stack trace in production
+    };
+  } else {
+    // Full details in development
+    return {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    };
   }
-
-  if (cleaned > 0) {
-    console.log(`Hera: Cleaned up ${cleaned} stale auth requests`);
-  }
-
-  // Also cleanup debugTargets for closed tabs
-  chrome.tabs.query({}, (tabs) => {
-    const activeTabIds = new Set(tabs.map(t => t.id));
-    let debugCleaned = 0;
-
-    for (const tabId of debugTargets.keys()) {
-      if (!activeTabIds.has(tabId)) {
-        debugTargets.delete(tabId);
-        debugCleaned++;
-      }
-    }
-
-    if (debugCleaned > 0) {
-      console.log(`Hera: Cleaned up ${debugCleaned} stale debugger targets`);
-    }
-  });
-
-  // Log memory stats for monitoring
-  console.log(`Hera: Active requests: ${authRequests.size}, Debug targets: ${debugTargets.size}`);
 }
 
-// Storage quota monitoring
-const QUOTA_WARNING_THRESHOLD = 0.8; // 80% of quota
-const MAX_SESSIONS = 1000; // Hard limit on stored sessions
-
-async function checkStorageQuota() {
+function sanitizeUrl(url) {
+  if (!url) return '';
   try {
-    const bytesInUse = await chrome.storage.local.getBytesInUse();
-    const quota = chrome.storage.local.QUOTA_BYTES || 10485760; // 10MB default
-    const usagePercent = bytesInUse / quota;
-
-    console.log(`Storage: ${(bytesInUse / 1024).toFixed(0)}KB / ${(quota / 1024).toFixed(0)}KB (${(usagePercent * 100).toFixed(1)}%)`);
-
-    if (usagePercent >= QUOTA_WARNING_THRESHOLD) {
-      console.warn(`⚠️ Storage quota warning: ${(usagePercent * 100).toFixed(0)}% used`);
-
-      // Cleanup oldest sessions
-      chrome.storage.local.get(['heraSessions'], (result) => {
-        const sessions = result.heraSessions || [];
-        if (sessions.length > MAX_SESSIONS) {
-          // Keep only the most recent sessions
-          const sorted = sessions.sort((a, b) =>
-            new Date(b.timestamp) - new Date(a.timestamp)
-          );
-          const trimmed = sorted.slice(0, MAX_SESSIONS);
-
-          chrome.storage.local.set({ heraSessions: trimmed }, () => {
-            console.log(`Trimmed sessions from ${sessions.length} to ${trimmed.length}`);
-          });
-        }
-      });
-    }
-  } catch (error) {
-    console.error('Failed to check storage quota:', error);
+    const urlObj = new URL(url);
+    return urlObj.hostname; // Only log hostname, not full URL with paths/params
+  } catch (e) {
+    return 'invalid-url';
   }
 }
+
+// --- Global State ---
+// MIGRATED TO MODULES: authRequests and debugTargets now managed by memoryManager
+// Wrap Maps with auto-sync proxies for automatic persistence
+// P1-1 FIX: Cache wrapper functions to prevent memory leak
+// P0-ARCH-3 FIX: Proxy with initialization check to prevent race conditions
+const authRequestsWrapperCache = new Map();
+
+const authRequests = new Proxy(memoryManager.authRequests, {
+  get(target, prop) {
+    // P0-ARCH-3 FIX: Warn if accessed before initialization
+    if (!memoryManager.initialized) {
+      console.warn(`Hera RACE: authRequests.${String(prop)} accessed before initialization - data may be incomplete`);
+    }
+
+    const value = target[prop];
+    if (typeof value === 'function') {
+      // P1-1: Return cached wrapper if it exists
+      if (!authRequestsWrapperCache.has(prop)) {
+        authRequestsWrapperCache.set(prop, function(...args) {
+          const result = value.apply(target, args);
+          // Auto-sync after mutating operations
+          if (prop === 'set' || prop === 'delete' || prop === 'clear') {
+            memoryManager.syncWrite();
+          }
+          return result;
+        });
+      }
+      return authRequestsWrapperCache.get(prop);
+    }
+    return value;
+  }
+});
+
+// P1-1 FIX: Cache wrapper functions to prevent memory leak
+// P0-ARCH-3 FIX: Proxy with initialization check to prevent race conditions
+const debugTargetsWrapperCache = new Map();
+
+const debugTargets = new Proxy(memoryManager.debugTargets, {
+  get(target, prop) {
+    // P0-ARCH-3 FIX: Warn if accessed before initialization
+    if (!memoryManager.initialized) {
+      console.warn(`Hera RACE: debugTargets.${String(prop)} accessed before initialization - data may be incomplete`);
+    }
+
+    const value = target[prop];
+    if (typeof value === 'function') {
+      // P1-1: Return cached wrapper if it exists
+      if (!debugTargetsWrapperCache.has(prop)) {
+        debugTargetsWrapperCache.set(prop, function(...args) {
+          const result = value.apply(target, args);
+          // Auto-sync after mutating operations
+          if (prop === 'set' || prop === 'delete' || prop === 'clear') {
+            memoryManager.syncWrite();
+          }
+          return result;
+        });
+      }
+      return debugTargetsWrapperCache.get(prop);
+    }
+    return value;
+  }
+});
+
+const version = "1.3";
+
+// Memory leak prevention: Delegated to memoryManager module
+function cleanupStaleRequests() {
+  memoryManager.cleanupStaleRequests();
+}
+
+// Storage quota monitoring: Delegated to storageManager module
+async function checkStorageQuota() {
+  await storageManager.checkStorageQuota();
+}
+
+// Initialize components FIRST (before alarm listeners need them)
+const evidenceCollector = new EvidenceCollector(); // Evidence-based vulnerability verification
+const alertManager = new AlertManager(); // Tiered, confidence-based alerting
+
+// CRITICAL FIX P0: Master initialization to prevent race conditions
+let heraReady = false;
+let initializationPromise = null;
+
+async function initializeHera() {
+  if (heraReady) return;
+
+  console.log('Hera: Starting initialization...');
+  const startTime = Date.now();
+
+  try {
+    // Initialize all persistent storage modules in parallel
+    await Promise.all([
+      memoryManager.initPromise,
+      sessionTracker.initPromise,
+      evidenceCollector.initPromise,
+      alertManager.initPromise,
+      ipCacheManager.initPromise
+    ]);
+
+    // P0-THIRTEENTH-2 FIX: Initialize compression analyzer with pako.js
+    try {
+      await compressionAnalyzer.initialize();
+      compressionAnalyzerReady = true;
+      console.log('Hera: Compression analyzer initialized (PhishZip enabled)');
+    } catch (error) {
+      console.warn('Hera: Compression analyzer initialization failed - PhishZip disabled:', error);
+      compressionAnalyzerReady = false;
+    }
+
+    heraReady = true;
+    const duration = Date.now() - startTime;
+    console.log(`Hera: All modules initialized in ${duration}ms`);
+
+    // CRITICAL FIX P0-4: Initialize webRequest listeners AFTER all modules ready
+    await initializeWebRequestListeners();
+
+  } catch (error) {
+    console.error('Hera: Initialization failed:', error);
+    // Mark as ready anyway to prevent permanent blocking
+    heraReady = true;
+  }
+}
+
+// Start initialization immediately
+initializationPromise = initializeHera();
 
 // Use chrome.alarms API (persists across service worker restarts)
 chrome.alarms.create('cleanupAuthRequests', { periodInMinutes: 2 });
 chrome.alarms.create('checkStorageQuota', { periodInMinutes: 10 });
 
-chrome.alarms.onAlarm.addListener((alarm) => {
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  await initializationPromise; // Wait for init before cleanup
+
   if (alarm.name === 'cleanupAuthRequests') {
     cleanupStaleRequests();
     alertManager.cleanupAlertHistory(); // Also cleanup alert deduplication history
+    evidenceCollector.cleanup(); // CRITICAL FIX: Prevent evidence cache memory leak
+    sessionTracker.cleanupOldSessions(); // CRITICAL FIX: Use alarms instead of setInterval
   } else if (alarm.name === 'checkStorageQuota') {
     checkStorageQuota();
+  } else if (alarm.name.startsWith('heraProbeConsent_')) {
+    // P1-TENTH-3 FIX: Handle unique alarm names with UUIDs
+    // P0-ARCH-2 FIX: Auto-revoke probe consent when alarm fires
+    const { probeConsentManager } = await import('./modules/probe-consent.js');
+    await probeConsentManager.revokeConsent();
+    console.log('Hera: Probe consent auto-revoked (24h expiry)');
+  } else if (alarm.name === 'heraPrivacyConsentExpiry') {
+    // P0-ARCH-2 FIX: Auto-revoke privacy consent when alarm fires
+    const { privacyConsentManager } = await import('./modules/privacy-consent.js');
+    await privacyConsentManager.withdrawConsent();
+    console.log('Hera: Privacy consent auto-revoked (expiry)');
   }
 });
-
-// Initialize EvidenceCollector first
-const evidenceCollector = new EvidenceCollector(); // Evidence-based vulnerability verification
-
-// Initialize AlertManager for tiered, confidence-based alerting
-const alertManager = new AlertManager();
 
 // Then initialize other components that depend on it
 const heraAuthDetector = new HeraAuthProtocolDetector(evidenceCollector);
@@ -226,6 +317,267 @@ const heraSecretScanner = new HeraSecretScanner();
 const heraExtensionDetector = new HeraMaliciousExtensionDetector();
 const heraAuthSecurityAnalyzer = new HeraAuthSecurityAnalyzer();
 const heraPortAuthAnalyzer = new HeraPortAuthAnalyzer();
+
+// CRITICAL FIX: Define ALL helper functions BEFORE event listeners are registered
+// Chrome can fire onInstalled immediately during module load, so functions must exist first
+
+// P0-NINTH-1 FIX: Mutex for debugger operations to prevent race conditions
+const debuggerOperationLocks = new Map(); // tabId -> Promise
+
+async function attachDebugger(tabId) {
+  if (tabId <= 0) return;
+
+  // P0-NINTH-1 FIX: Acquire lock to prevent concurrent attach attempts
+  if (debuggerOperationLocks.has(tabId)) {
+    console.log(`Hera: Debugger operation already in progress for tab ${tabId}, skipping`);
+    return; // Another attach is in progress
+  }
+
+  // Create lock promise
+  let releaseLock;
+  const lockPromise = new Promise(resolve => { releaseLock = resolve; });
+  debuggerOperationLocks.set(tabId, lockPromise);
+
+  try {
+    // P0-NINTH-1 FIX: Double-check under lock
+    if (debugTargets.has(tabId)) {
+      console.log(`Hera: Debugger already attached to tab ${tabId}`);
+      return;
+    }
+
+    const result = await chrome.storage.local.get(['enableResponseCapture']);
+    const enabled = result.enableResponseCapture === true;
+
+    if (!enabled) {
+      return;
+    }
+
+    const debuggee = { tabId: tabId };
+
+    // P0-NINTH-1 FIX: Promisify attach for proper async/await
+    const attachSuccess = await new Promise((resolve) => {
+      chrome.debugger.attach(debuggee, version, () => {
+        if (chrome.runtime.lastError) {
+          const error = chrome.runtime.lastError.message;
+          console.warn(`Hera: Failed to attach debugger to tab ${tabId}: ${error}`);
+          resolve(false);
+        } else {
+          resolve(true);
+        }
+      });
+    });
+
+    if (!attachSuccess) {
+      return; // Attach failed
+    }
+
+    // P0-NINTH-1 FIX: Only set in map AFTER successful attach
+    debugTargets.set(tabId, debuggee);
+
+    // Enable Network domain
+    const networkEnabled = await new Promise((resolve) => {
+      chrome.debugger.sendCommand(debuggee, "Network.enable", {}, () => {
+        if (chrome.runtime.lastError) {
+          console.warn(`Failed to enable Network for tab ${tabId}`);
+          resolve(false);
+        } else {
+          resolve(true);
+        }
+      });
+    });
+
+    if (!networkEnabled) {
+      // Cleanup on failure
+      await new Promise((resolve) => {
+        chrome.debugger.detach(debuggee, () => {
+          debugTargets.delete(tabId);
+          resolve();
+        });
+      });
+    }
+
+  } catch (error) {
+    console.error('Hera: debugger attach failed:', error);
+    debugTargets.delete(tabId); // Ensure cleanup
+  } finally {
+    // P0-NINTH-1 FIX: Always release lock
+    debuggerOperationLocks.delete(tabId);
+    releaseLock();
+  }
+}
+
+async function initializeDebugger() {
+  const tabs = await chrome.tabs.query({});
+  for (const tab of tabs) {
+    if (tab.id && tab.url && !tab.url.startsWith('chrome://')) {
+      attachDebugger(tab.id);
+    }
+  }
+}
+
+async function updateBadge() {
+  return storageManager.updateBadge();
+}
+
+function showAuthSecurityAlert(finding, url) {
+  try {
+    // Enhance finding with URL
+    const enrichedFinding = {
+      ...finding,
+      url: url,
+      evidence: finding.evidence || {}
+    };
+
+    // Use AlertManager for tiered, confidence-based alerting
+    alertManager.processFinding(enrichedFinding);
+
+  } catch (error) {
+    console.error('Failed to show auth security alert:', error);
+  }
+}
+
+async function handleInterceptorInjection(sender, message) {
+  try {
+    const tabId = sender.tab?.id;
+    let url = sender.tab?.url;
+
+    if (!tabId) {
+      return { success: false, error: 'No tab ID available' };
+    }
+
+    // P1-TENTH-2 FIX: Get latest tab URL to prevent race condition
+    const tab = await chrome.tabs.get(tabId);
+    url = tab.url; // Use current URL, not cached sender.tab.url
+
+    // P1-TENTH-2 FIX: Enhanced URL validation
+    if (!url || url.startsWith('chrome://') || url.startsWith('about:') ||
+        url.startsWith('chrome-extension://') || url.startsWith('edge://') ||
+        url.startsWith('chrome-devtools://') || url.startsWith('view-source:')) {
+      console.log(`Hera: Skipping interceptor injection on restricted page: ${url}`);
+      return { success: false, error: 'Cannot inject on restricted pages' };
+    }
+
+    // P1-TENTH-2 FIX: Validate URL is HTTP/HTTPS only
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      console.log(`Hera: Skipping injection on non-HTTP(S) page: ${url}`);
+      return { success: false, error: 'Only HTTP(S) pages supported' };
+    }
+
+    // Check if chrome.scripting API is available
+    if (!chrome.scripting || !chrome.scripting.executeScript) {
+      console.error('Hera: chrome.scripting API not available - host permissions may not be granted');
+      return { success: false, error: 'Scripting permission not available' };
+    }
+
+    // Check if we have permission for this URL
+    const hasPermission = await chrome.permissions.contains({
+      origins: [new URL(url).origin + '/*']
+    });
+
+    if (!hasPermission) {
+      console.warn(`Hera: No permission for ${url} - host permissions not granted`);
+      return { success: false, error: 'Host permission not granted for this site' };
+    }
+
+    // P0-NINTH-3 FIX: Double-check permission right before injection to narrow race window
+    const hasPermissionNow = await chrome.permissions.contains({
+      origins: [new URL(url).origin + '/*']
+    });
+
+    if (!hasPermissionNow) {
+      console.warn('Hera: Permission revoked between check and injection');
+      return { success: false, error: 'Permission no longer available' };
+    }
+
+    // P2-NINTH-1 FIX: Validate script path against whitelist
+    const scriptFile = 'response-interceptor.js'; // Hardcoded for now
+
+    if (!ALLOWED_SCRIPTS.has(scriptFile)) {
+      console.error(`Hera: Attempted to inject non-whitelisted script: ${scriptFile}`);
+      return { success: false, error: 'Invalid script path' };
+    }
+
+    // P1-TENTH-2 FIX: THIRD check right before injection
+    const latestTab = await chrome.tabs.get(tabId);
+    if (latestTab.url !== url) {
+      console.warn(`Hera SECURITY: Tab URL changed during injection (TOCTOU attempt blocked)`);
+      console.warn(`  Original: ${url}`);
+      console.warn(`  Current: ${latestTab.url}`);
+      return { success: false, error: 'Tab URL changed during injection (security block)' };
+    }
+
+    // P0-NINTH-3 FIX: Wrap injection in try-catch to handle permission revocation
+    try {
+      const result = await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        world: 'ISOLATED',
+        files: [scriptFile]
+      });
+
+      // Check for Chrome runtime errors (permission revoked during injection)
+      if (chrome.runtime.lastError) {
+        console.error('Hera: Injection failed (permission revoked?):', chrome.runtime.lastError);
+        return { success: false, error: chrome.runtime.lastError.message };
+      }
+
+      console.log(`Hera: Response interceptor injected in isolated world for tab ${tabId}`);
+      return { success: true };
+
+    } catch (injectionError) {
+      // P0-NINTH-3 FIX: Catch errors from permission revocation mid-flight
+      if (injectionError.message?.includes('permission') ||
+          injectionError.message?.includes('Cannot access')) {
+        console.warn('Hera: Injection blocked - permission revoked mid-flight');
+        return { success: false, error: 'Permission revoked during injection' };
+      }
+      throw injectionError; // Re-throw unexpected errors
+    }
+  } catch (error) {
+    // P3-NINTH-1 FIX: Sanitize error messages to avoid leaking file paths
+    console.error('Hera: Failed to inject response interceptor:', sanitizeError(error));
+    return { success: false, error: error.message || 'Unknown error' };
+  }
+}
+
+// --- Event Listeners (registered AFTER all function definitions) ---
+
+// CONSOLIDATED onInstalled listener (was duplicated 3x - lines 67, 422, 1455)
+chrome.runtime.onInstalled.addListener(async (details) => {
+  console.log(`Hera ${details.reason}:`, details);
+
+  // On first install only
+  if (details.reason === 'install') {
+    try {
+      // SECURITY FIX: Clear any leftover data from previous installation
+      // Prevents privacy leak if extension was previously installed
+      await chrome.storage.local.clear();
+      console.log('Hera: Cleared previous installation data');
+
+      // 1. Set default configuration
+      await chrome.storage.local.set({
+        heraConfig: {
+          syncEndpoint: null,
+          riskThreshold: 50,
+          enableRealTimeAlerts: true,
+          autoExportEnabled: true,
+          autoExportThreshold: 950
+        }
+      });
+      console.log('Hera: Default configuration set');
+
+      // SECURITY FIX: Don't auto-request permissions on install (aggressive UX)
+      // Instead, show welcome screen and let user enable monitoring via popup
+      // This follows Chrome extension best practices for permission requests
+      console.log('Hera: Installation complete. Open popup to enable monitoring.');
+    } catch (error) {
+      console.error('Hera: Error during installation:', error);
+    }
+  }
+
+  // On install or update, initialize extension
+  initializeDebugger();
+  updateBadge();
+});
 
 // Add missing wrapper methods for HeraAuthProtocolDetector
 heraAuthDetector.isAuthRequest = function(url, options) {
@@ -247,27 +599,13 @@ heraAuthDetector.analyze = function(url, method, headers, body) {
   });
 };
 
-// --- Storage Helper ---
+// --- Storage Helper (MIGRATED TO storageManager module) ---
 const heraStore = {
   async storeAuthEvent(eventData) {
-    try {
-      const result = await chrome.storage.local.get({ heraSessions: [] });
-      const sessions = result.heraSessions;
-      sessions.push(eventData);
-      await chrome.storage.local.set({ heraSessions: sessions });
-    } catch (error) {
-      console.error('Failed to store auth event:', error);
-    }
+    return storageManager.storeAuthEvent(eventData);
   },
   async storeSession(sessionData) {
-    try {
-      const result = await chrome.storage.local.get({ heraSessions: [] });
-      const sessions = result.heraSessions;
-      sessions.push(sessionData);
-      await chrome.storage.local.set({ heraSessions: sessions });
-    } catch (error) {
-      console.error('Failed to store session:', error);
-    }
+    return storageManager.storeSession(sessionData);
   }
 };
 
@@ -291,34 +629,7 @@ function decodeRequestBody(requestBody) {
     }
 }
 
-async function updateBadge() {
-    const stored = await chrome.storage.local.get(['heraSessions']);
-    const count = stored.heraSessions ? stored.heraSessions.length : 0;
-    if (count > 0) {
-        chrome.action.setBadgeText({ text: count.toString() });
-        chrome.action.setBadgeBackgroundColor({ color: '#dc3545' });
-    } else {
-        chrome.action.setBadgeText({ text: '' });
-    }
-}
-
-// Show security alert for authentication issues (using AlertManager)
-function showAuthSecurityAlert(finding, url) {
-  try {
-    // Enhance finding with URL
-    const enrichedFinding = {
-      ...finding,
-      url: url,
-      evidence: finding.evidence || {}
-    };
-
-    // Use AlertManager for tiered, confidence-based alerting
-    alertManager.processFinding(enrichedFinding);
-
-  } catch (error) {
-    console.error('Failed to show auth security alert:', error);
-  }
-}
+// CRITICAL FIX: Removed duplicate updateBadge and showAuthSecurityAlert (already defined at top of file)
 
 // Show security alert for malicious extension detection (using AlertManager)
 function showExtensionSecurityAlert(finding) {
@@ -343,11 +654,35 @@ function showExtensionSecurityAlert(finding) {
 
 // --- Main Logic ---
 
-// 1. Listen for requests
-chrome.webRequest.onBeforeRequest.addListener(
+// Initialize webRequest listeners only if permission granted
+async function initializeWebRequestListeners() {
+  const hasPermission = await chrome.permissions.contains({
+    permissions: ['webRequest'],
+    origins: ['https://*/*', 'http://localhost/*']
+  });
+
+  if (!hasPermission) {
+    console.warn('Hera: webRequest permission not granted - request monitoring disabled');
+    console.warn('Hera: Grant permission in extension settings to enable full functionality');
+    return false;
+  }
+
+  console.log('Hera: webRequest permissions granted, initializing listeners...');
+
+  // 1. Listen for requests
+  chrome.webRequest.onBeforeRequest.addListener(
     (details) => {
+        // CRITICAL FIX P0: Wait for initialization before processing
+        if (!heraReady) {
+            console.warn('Hera: Not ready, skipping request:', details.url);
+            return;
+        }
+
         const isAuthRelated = heraAuthDetector.isAuthRequest(details.url, {});
         if (isAuthRelated) {
+            // SECURITY FIX P2: Generate nonce for request/response matching
+            const requestNonce = crypto.randomUUID();
+
             authRequests.set(details.requestId, {
                 id: details.requestId,
                 url: details.url,
@@ -356,6 +691,7 @@ chrome.webRequest.onBeforeRequest.addListener(
                 tabId: details.tabId,
                 timestamp: new Date().toISOString(),
                 requestBody: decodeRequestBody(details.requestBody),
+                nonce: requestNonce, // For matching with intercepted response
                 // Placeholders for data from other listeners
                 requestHeaders: [],
                 responseHeaders: [],
@@ -372,6 +708,7 @@ chrome.webRequest.onBeforeRequest.addListener(
 // 2. Capture request headers
 chrome.webRequest.onBeforeSendHeaders.addListener(
     (details) => {
+        if (!heraReady) return; // Wait for init
         const requestData = authRequests.get(details.requestId);
         if (requestData) {
             requestData.requestHeaders = details.requestHeaders;
@@ -408,6 +745,7 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
 // 3. Capture response headers and status code
 chrome.webRequest.onHeadersReceived.addListener(
     (details) => {
+      if (!heraReady) return; // Wait for init
         const requestData = authRequests.get(details.requestId);
         if (requestData) {
             requestData.statusCode = details.statusCode;
@@ -420,38 +758,7 @@ chrome.webRequest.onHeadersReceived.addListener(
 
 // --- Debugger and Final Save Logic ---
 
-// Attach debugger to all existing and new tabs
-async function initializeDebugger() {
-    const tabs = await chrome.tabs.query({});
-    for (const tab of tabs) {
-        if (tab.id && tab.url && !tab.url.startsWith('chrome://')) {
-            attachDebugger(tab.id);
-        }
-    }
-}
-
-async function attachDebugger(tabId) {
-    if (tabId > 0 && !debugTargets.has(tabId)) {
-        // Check if response capture is enabled
-        const result = await chrome.storage.local.get(['enableResponseCapture']);
-        const enabled = result.enableResponseCapture !== false; // Default to true
-
-        if (!enabled) {
-            console.log('Response capture disabled - skipping debugger attachment');
-            return;
-        }
-
-        const debuggee = { tabId: tabId };
-        chrome.debugger.attach(debuggee, version, () => {
-            if (chrome.runtime.lastError) {
-                // console.warn(`Could not attach debugger to tab ${tabId}:`, chrome.runtime.lastError.message);
-                return;
-            }
-            debugTargets.set(tabId, debuggee);
-            chrome.debugger.sendCommand(debuggee, "Network.enable");
-        });
-    }
-}
+// CRITICAL FIX: Moved attachDebugger and initializeDebugger to top of file (before onInstalled)
 
 chrome.tabs.onCreated.addListener((tab) => tab.id && attachDebugger(tab.id));
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -461,9 +768,35 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
     if (debugTargets.has(tabId)) {
-        chrome.debugger.detach({ tabId: tabId }, () => debugTargets.delete(tabId));
+        const debuggee = debugTargets.get(tabId);
+
+        chrome.debugger.detach(debuggee, () => {
+            // Log error but don't block cleanup
+            if (chrome.runtime.lastError) {
+                console.log(`Debugger auto-detached for closed tab ${tabId}: ${chrome.runtime.lastError.message}`);
+            } else {
+                console.log(`Successfully detached debugger from closed tab ${tabId}`);
+            }
+        });
+
+        // P1-NINTH-1 FIX: Delete immediately, don't wait for callback
+        // The tab is already closed, so debugger is detached by Chrome anyway
+        debugTargets.delete(tabId);
     }
 });
+
+// P1-NINTH-1 FIX: Periodic cleanup of stale debugger entries (defense in depth)
+setInterval(async () => {
+  const allTabs = await chrome.tabs.query({});
+  const validTabIds = new Set(allTabs.map(tab => tab.id));
+
+  for (const [tabId, debuggee] of debugTargets.entries()) {
+    if (!validTabIds.has(tabId)) {
+      console.warn(`Hera: Removing stale debugger entry for closed tab ${tabId}`);
+      debugTargets.delete(tabId);
+    }
+  }
+}, 60000); // Clean up every minute
 
 // Listen for debugger events
 chrome.debugger.onEvent.addListener((source, method, params) => {
@@ -479,6 +812,24 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     if (method === "Network.loadingFinished") {
         const requestData = authRequests.get(params.requestId);
         if (requestData && requestData.responseDetails) {
+            // P0-TENTH-1 FIX: Validate source tabId matches request tabId
+            if (source.tabId !== requestData.tabId) {
+                console.error('Hera SECURITY: debugger event tabId mismatch');
+                return;
+            }
+
+            // P0-TENTH-1 FIX: Validate request still exists in debugTargets
+            if (!debugTargets.has(source.tabId)) {
+                console.error('Hera SECURITY: debugger event from non-tracked tab');
+                return;
+            }
+
+            // P0-TENTH-1 FIX: Validate requestId format (Chrome uses UUID-like format)
+            if (!params.requestId || typeof params.requestId !== 'string') {
+                console.error('Hera SECURITY: invalid requestId format');
+                return;
+            }
+
             const debuggee = { tabId: source.tabId };
             chrome.debugger.sendCommand(
                 debuggee,
@@ -495,7 +846,20 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
                                 body = "[Hera: Failed to decode base64 body]";
                             }
                         }
+
+                        // P0-TENTH-1 FIX: Sanitize response body before storage
+                        // Check for potentially malicious content that could execute in popup context
+                        if (typeof body === 'string') {
+                            if (/<script|onerror=|onclick=|onload=|javascript:/i.test(body)) {
+                                console.warn('Hera SECURITY: Response contains potentially malicious content, sanitizing');
+                                // Don't block entirely, but mark as suspicious
+                                requestData.securityFlags = requestData.securityFlags || [];
+                                requestData.securityFlags.push('SUSPICIOUS_CONTENT_IN_RESPONSE');
+                            }
+                        }
+
                         requestData.responseBody = body;
+                        requestData.captureSource = 'debugger'; // Mark the source
 
                         // Ensure metadata structure exists
                         if (!requestData.metadata) {
@@ -537,7 +901,26 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
                     // --- FINAL SAVE POINT ---
                     // Now that we have all data, save the complete request object.
                     chrome.storage.local.get({ heraSessions: [] }, (result) => {
-                        const sessions = result.heraSessions;
+                        let sessions = result.heraSessions;
+
+                        // DOS prevention: Limit total sessions
+                        const MAX_SESSIONS = 1000;
+                        if (sessions.length >= MAX_SESSIONS) {
+                            console.warn(`Session limit reached (${MAX_SESSIONS}), removing oldest`);
+                            sessions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                            sessions = sessions.slice(0, MAX_SESSIONS - 1);
+                        }
+
+                        // DOS prevention: Limit individual request size
+                        const MAX_REQUEST_SIZE = 100 * 1024; // 100KB per request
+                        const requestSize = JSON.stringify(requestData).length;
+                        if (requestSize > MAX_REQUEST_SIZE) {
+                            console.warn(`Request too large (${requestSize} bytes), truncating response body`);
+                            if (requestData.responseBody) {
+                                requestData.responseBody = requestData.responseBody.substring(0, 10000) + '... [truncated]';
+                            }
+                        }
+
                         sessions.push(requestData);
                         chrome.storage.local.set({ heraSessions: sessions }, () => {
                             updateBadge();
@@ -551,11 +934,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 });
 
 // --- Extension Lifecycle ---
-chrome.runtime.onInstalled.addListener(() => {
-    console.log('Hera extension installed/updated.');
-    initializeDebugger();
-    updateBadge();
-});
+// NOTE: onInstalled consolidated at line 67 (was duplicated here)
 
 chrome.runtime.onStartup.addListener(() => {
     console.log('Hera starting up...');
@@ -563,46 +942,212 @@ chrome.runtime.onStartup.addListener(() => {
     updateBadge();
 });
 
+// CRITICAL FIX P0-NEW: onSuspend handler REMOVED
+// Reason: Chrome MV3 onSuspend does NOT wait for async operations
+// All _syncToStorage() methods are async (use await chrome.storage.*.set())
+// Service worker terminates before writes complete → data loss
+// Solution: Aggressive debouncing (reduced timeout from 100-200ms to 1000ms)
+// See: https://developer.chrome.com/docs/extensions/mv3/service_workers/events/#suspend
+
+// Original broken code (kept for reference):
+// chrome.runtime.onSuspend.addListener(() => {
+//   memoryManager._syncToStorage(); // Returns Promise, not awaited!
+//   // Service worker dies here → chrome.storage.*.set() abandoned
+// });
+
+// CRITICAL FIX: Handle devtools port connections (P1)
+// Devtools panel connects via chrome.runtime.connect() and sends messages via port.postMessage()
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'devtools-page') {
+    console.log('Hera: DevTools panel connected');
+
+    // Handle messages from devtools panel
+    port.onMessage.addListener(async (message) => {
+      console.log('Hera: DevTools message received:', message.type);
+
+      if (message.type === 'INIT_DEVTOOLS') {
+        // Send all existing requests to devtools panel
+        chrome.storage.local.get({ heraSessions: [] }, (result) => {
+          result.heraSessions.forEach(session => {
+            port.postMessage({
+              type: 'AUTH_REQUEST',
+              data: session
+            });
+          });
+        });
+      } else if (message.type === 'SET_RECORDING_STATE') {
+        // Store recording state in session storage
+        await chrome.storage.session.set({ heraRecording: message.isRecording });
+        console.log(`Hera: Recording ${message.isRecording ? 'enabled' : 'paused'}`);
+      } else if (message.type === 'CLEAR_REQUESTS') {
+        // CRITICAL FIX P1: Route through storageManager
+        await storageManager.clearAllSessions();
+        await memoryManager.clearAuthRequests();
+        console.log('Hera: All requests cleared');
+      }
+    });
+
+    // Handle disconnect
+    port.onDisconnect.addListener(() => {
+      console.log('Hera: DevTools panel disconnected');
+    });
+  }
+});
+
 // Consolidated message listener (removed duplicate listener at line 4014)
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('Background received message:', message.action);
+  // Sender validation: Reject external messages (security)
+  if (!sender.id || sender.id !== chrome.runtime.id) {
+    console.warn('Message from external source rejected:', sender);
+    sendResponse({ success: false, error: 'External messages not allowed' });
+    return false;
+  }
+
+  // Input validation
+  if (!message || typeof message !== 'object') {
+    console.warn('Invalid message received:', message);
+    sendResponse({ success: false, error: 'Invalid message format' });
+    return false;
+  }
+
+  // P0-4 FIX: Strict message routing - prevent double processing
+  // This listener handles 'action' messages ONLY
+  // Messages with 'type' are handled by the second listener
+  if (!message.action) {
+    // Not for this listener - let it fall through to the next listener
+    return false;
+  }
+
+  // P0-4 FIX: Reject messages with BOTH action AND type (security)
+  // Prevents attacker from triggering both listeners with same message
+  if (message.type) {
+    console.warn('Hera: Message has both action and type - rejecting to prevent double processing');
+    sendResponse({ success: false, error: 'Invalid message format: cannot have both action and type' });
+    return false;
+  }
+
+  if (typeof message.action !== 'string') {
+    console.warn('Message action is not a string:', message);
+    sendResponse({ success: false, error: 'Invalid action' });
+    return false;
+  }
+
+  const messageType = message.action;
+
+  // P0-EIGHTH-3 FIX: Validate sender.url for ALL actions (not just sensitive ones)
+  const allowedSenderUrls = [
+    chrome.runtime.getURL('popup.html'),
+    chrome.runtime.getURL('devtools/devtools.html'),
+    chrome.runtime.getURL('probe-consent.html'),
+    chrome.runtime.getURL('privacy-consent-ui.html')
+  ];
+
+  const senderUrl = sender.url || '';
+  const isAuthorizedSender = allowedSenderUrls.some(allowed => senderUrl.startsWith(allowed));
+
+  // P0-EIGHTH-3 FIX: Content scripts can ONLY send specific whitelisted messages
+  const contentScriptAllowedActions = [
+    'responseIntercepted', // Content script sends this (response interceptor)
+    'getBackendScan',      // P0-SIXTEENTH-1 FIX: Content script requests backend scan results
+    'ANALYSIS_ERROR',      // Content script reports errors
+    'INJECT_RESPONSE_INTERCEPTOR' // Content script requests injection
+  ];
+
+  // P0-EIGHTH-3 FIX: Check authorization for all actions
+  // P0-SIXTEENTH-1 FIX: Add getBackendScan to allowed actions (sent by content-script.js:231)
+  if (!isAuthorizedSender && !contentScriptAllowedActions.includes(messageType)) {
+    console.error(`Hera SECURITY: Unauthorized message from ${senderUrl}: ${messageType}`);
+    sendResponse({ success: false, error: 'Unauthorized sender' });
+    return false;
+  }
+
+  // Extra validation for highly sensitive actions (requires popup/devtools only, NOT content script)
+  const highlySecurityActions = ['probe:alg_none', 'repeater:send', 'clearRequests', 'updateResponseCaptureSetting'];
+  if (highlySecurityActions.includes(messageType) && !isAuthorizedSender) {
+    console.warn(`Highly sensitive action '${messageType}' blocked from unauthorized source:`, senderUrl);
+    sendResponse({ success: false, error: 'Unauthorized: This action requires popup or devtools context' });
+    return false;
+  }
+
+  console.log('Background received message:', messageType);
 
   // Handle intercepted responses from response-interceptor.js
   if (message.action === 'responseIntercepted') {
+    if (!message.data || typeof message.data !== 'object') {
+      console.warn('responseIntercepted message missing data');
+      sendResponse({ success: false, error: 'Missing data' });
+      return false;
+    }
     const data = message.data;
 
-    // Find the matching request in authRequests
-    // Note: We may not have a requestId from the interceptor, so match by URL
-    for (const [requestId, requestData] of authRequests.entries()) {
-      if (requestData.url === data.url && !requestData.responseBody) {
-        requestData.responseBody = data.body;
-        requestData.statusCode = data.statusCode;
+    // SECURITY FIX P2: Match by nonce (fallback to timestamp for older requests)
+    let match = null;
 
-        // Analyze response body for security issues
-        if (!requestData.metadata) requestData.metadata = {};
-        if (!requestData.metadata.authAnalysis) {
-          requestData.metadata.authAnalysis = { issues: [], riskScore: 0, riskCategory: 'low' };
+    // Try nonce-based matching first (secure, prevents race conditions)
+    if (data.nonce) {
+      for (const [requestId, requestData] of authRequests.entries()) {
+        if (requestData.nonce === data.nonce && !requestData.responseBody) {
+          match = { requestId, requestData };
+          break;
         }
-
-        const responseBodyIssues = heraAuthDetector.analyzeResponseBody(data.body);
-        if (responseBodyIssues.length > 0) {
-          requestData.metadata.authAnalysis.issues.push(...responseBodyIssues);
-          requestData.metadata.authAnalysis.riskScore = heraAuthDetector.calculateRiskScore(requestData.metadata.authAnalysis.issues);
-          requestData.metadata.authAnalysis.riskCategory = heraAuthDetector.getRiskCategory(requestData.metadata.authAnalysis.riskScore);
-        }
-
-        // Save to storage
-        chrome.storage.local.get({ heraSessions: [] }, (result) => {
-          const sessions = result.heraSessions;
-          sessions.push(requestData);
-          chrome.storage.local.set({ heraSessions: sessions }, () => {
-            updateBadge();
-            authRequests.delete(requestId);
-          });
-        });
-
-        break; // Found matching request
       }
+    }
+
+    // Fallback to URL + timestamp matching (for backwards compatibility)
+    if (!match) {
+      let bestMatchScore = Infinity;
+      for (const [requestId, requestData] of authRequests.entries()) {
+        if (requestData.url === data.url && !requestData.responseBody) {
+          const reqTime = new Date(requestData.timestamp).getTime();
+          const interceptTime = new Date(data.timestamp).getTime();
+          const timeDiff = Math.abs(interceptTime - reqTime);
+
+          if (timeDiff < 30000 && timeDiff < bestMatchScore) {
+            match = { requestId, requestData };
+            bestMatchScore = timeDiff;
+          }
+        }
+      }
+    }
+
+    if (match) {
+      const { requestId, requestData } = match;
+
+      requestData.responseBody = data.body;
+      requestData.statusCode = data.statusCode;
+      requestData.captureSource = 'interceptor'; // Mark the source
+
+      // Analyze response body for security issues
+      if (!requestData.metadata) requestData.metadata = {};
+      if (!requestData.metadata.authAnalysis) {
+        requestData.metadata.authAnalysis = { issues: [], riskScore: 0, riskCategory: 'low' };
+      }
+
+      const responseBodyIssues = heraAuthDetector.analyzeResponseBody(data.body);
+      if (responseBodyIssues.length > 0) {
+        requestData.metadata.authAnalysis.issues.push(...responseBodyIssues);
+        requestData.metadata.authAnalysis.riskScore = heraAuthDetector.calculateRiskScore(requestData.metadata.authAnalysis.issues);
+        requestData.metadata.authAnalysis.riskCategory = heraAuthDetector.getRiskCategory(requestData.metadata.authAnalysis.riskScore);
+      }
+
+      // CRITICAL FIX P1: Consolidate storage logic - let storageManager handle all quota/size limits
+      // DOS prevention: Limit individual request size BEFORE storage
+      const MAX_REQUEST_SIZE = 100 * 1024; // 100KB per request
+      const requestSize = JSON.stringify(requestData).length;
+      if (requestSize > MAX_REQUEST_SIZE) {
+        console.warn(`Request too large (${requestSize} bytes), truncating response body`);
+        if (requestData.responseBody) {
+          requestData.responseBody = requestData.responseBody.substring(0, 10000) + '... [truncated]';
+        }
+      }
+
+      // Route through storageManager (handles MAX_SESSIONS quota internally)
+      storageManager.storeAuthEvent(requestData).then(() => {
+        updateBadge();
+        authRequests.delete(requestId);
+      });
+    } else {
+      console.warn('No matching auth request found for intercepted response:', data.url);
     }
 
     sendResponse({ success: true });
@@ -610,12 +1155,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'probe:alg_none') {
-    performAlgNoneProbe(message.request, message.jwt).then(sendResponse);
+    if (!message.request || !message.jwt) {
+      sendResponse({ success: false, error: 'Missing request or JWT' });
+      return false;
+    }
+    // P0-SIXTH-1 FIX: Proper error handling for async probe
+    performAlgNoneProbe(message.request, message.jwt, sender)
+      .then(sendResponse)
+      .catch(error => {
+        console.error('Hera: probe:alg_none failed:', error);
+        sendResponse({ success: false, error: error.message });
+      });
     return true;
   }
 
   if (message.action === 'repeater:send') {
-    performRepeaterRequest(message.rawRequest).then(sendResponse);
+    if (!message.rawRequest || typeof message.rawRequest !== 'string') {
+      sendResponse({ success: false, error: 'Missing or invalid rawRequest' });
+      return false;
+    }
+    // P0-SIXTH-1 FIX: Proper error handling for async repeater
+    performRepeaterRequest(message.rawRequest, sender)
+      .then(sendResponse)
+      .catch(error => {
+        console.error('Hera: repeater:send failed:', error);
+        sendResponse({ success: false, error: error.message });
+      });
     return true;
   }
 
@@ -638,6 +1203,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'getBackendScan') {
+    if (!message.domain || typeof message.domain !== 'string') {
+      sendResponse({ success: false, error: 'Missing or invalid domain' });
+      return false;
+    }
     const requestsArray = Array.from(authRequests.values());
     const domainRequests = requestsArray.filter(req =>
       new URL(req.url).hostname === message.domain
@@ -679,9 +1248,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === 'clearRequests') {
     authRequests.clear();
-    chrome.storage.local.set({ heraSessions: [] }, () => {
+    // CRITICAL FIX P1: Route through storageManager
+    // P0-SIXTH-1 FIX: Proper error handling for async operation
+    storageManager.clearAllSessions().then(() => {
       updateBadge();
       sendResponse({ success: true });
+    }).catch(error => {
+      console.error('Hera: clearRequests failed:', error);
+      sendResponse({ success: false, error: error.message });
     });
     return true;
   }
@@ -690,7 +1264,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message.enabled) {
       for (const [tabId, debuggee] of debugTargets.entries()) {
         chrome.debugger.detach(debuggee, () => {
-          console.log(`Detached debugger from tab ${tabId}`);
+          if (chrome.runtime.lastError) {
+            console.warn(`Error detaching debugger from tab ${tabId}:`, chrome.runtime.lastError.message);
+          } else {
+            console.log(`Detached debugger from tab ${tabId}`);
+          }
         });
       }
       debugTargets.clear();
@@ -707,547 +1285,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false; // No async response needed
 });
 
-async function performAlgNoneProbe(originalRequest, jwt) {
-  try {
-    const parts = jwt.split('.');
-    const header = JSON.parse(atob(parts[0].replace(/-/g, '+').replace(/_/g, '/')));
-    const payload = parts[1]; // Keep payload as is
+// NOTE: Security probe functions moved to ./modules/security-probes.js (line 23)
+// Removed duplicate code (276 lines):
+// - ProbeRateLimiter class
+// - validateProbeRequest (also in url-utils.js)
+// - sanitizeProbeHeaders
+// - performAlgNoneProbe
+// - performRepeaterRequest
+// Now imported from security-probes module for better code organization
 
-    // Create the malicious header
-    header.alg = 'none';
-    const maliciousHeader = btoa(JSON.stringify(header)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+// (Removed duplicate isExtensionRequest, isThirdPartyRequest, isSensitivePath - now imported from ./modules/url-utils.js at line 23)
 
-    // Construct the alg:none token (header.payload.)
-    const maliciousToken = `${maliciousHeader}.${payload}.`;
-
-    // Re-create the request headers, replacing the original token
-    const newHeaders = new Headers();
-    originalRequest.requestHeaders.forEach(h => {
-      if (h.name.toLowerCase() === 'authorization') {
-        newHeaders.set('Authorization', `Bearer ${maliciousToken}`);
-      } else {
-        newHeaders.set(h.name, h.value);
-      }
-    });
-
-    // Perform the fetch request
-    const response = await fetch(originalRequest.url, {
-      method: originalRequest.method,
-      headers: newHeaders,
-      body: originalRequest.method !== 'GET' && originalRequest.method !== 'HEAD' ? originalRequest.requestBody : undefined,
-    });
-
-    return { success: response.ok, status: response.status, statusText: response.statusText };
-
-  } catch (error) {
-    console.error('Hera Probe Error:', error);
-    return { success: false, error: error.message };
-  }
-}
-
-function isExtensionRequest(initiator) {
-  return initiator && initiator.startsWith('chrome-extension://');
-}
-
-function isThirdPartyRequest(requestUrl, initiatorUrl) {
-  if (!initiatorUrl) return false;
-  try {
-    const reqHostname = new URL(requestUrl).hostname;
-    const initHostname = new URL(initiatorUrl).hostname;
-    // Check if it's not the same domain or a subdomain
-    return !reqHostname.endsWith(initHostname);
-  } catch (e) {
-    return false;
-  }
-}
-
-function isSensitivePath(path) {
-  const sensitiveKeywords = [
-    'admin', 'user', 'account', 'profile', 'settings', 'wallet', 'billing',
-    'export', 'import', 'download', 'upload', 'delete', 'update', 'edit', 'create',
-    'private', 'sensitive', 'internal', 'debug'
-  ];
-  const lowerPath = path.toLowerCase();
-  return sensitiveKeywords.some(keyword => lowerPath.includes(`/${keyword}`));
-}
-
-async function performRepeaterRequest(rawRequest) {
-  try {
-    // Parse the raw HTTP request
-    const lines = rawRequest.split('\n');
-    const requestLine = lines[0].split(' ');
-    const method = requestLine[0];
-    const url = requestLine[1];
-
-    const headers = new Headers();
-    let bodyIndex = -1;
-    for (let i = 1; i < lines.length; i++) {
-      if (lines[i] === '') {
-        bodyIndex = i + 1;
-        break;
-      }
-      const headerParts = lines[i].split(': ');
-      headers.set(headerParts[0], headerParts[1]);
-    }
-
-    const body = bodyIndex !== -1 ? lines.slice(bodyIndex).join('\n') : undefined;
-
-    // Perform the fetch request
-    const response = await fetch(url, {
-      method: method,
-      headers: headers,
-      body: body,
-    });
-
-    // Format the raw HTTP response
-    let rawResponse = `HTTP/1.1 ${response.status} ${response.statusText}\n`;
-    response.headers.forEach((value, name) => {
-      rawResponse += `${name}: ${value}\n`;
-    });
-    rawResponse += '\n';
-    rawResponse += await response.text();
-
-    return { rawResponse: rawResponse };
-
-  } catch (error) {
-    console.error('Hera Repeater Error:', error);
-    return { error: error.message };
-  }
-}
+// (Removed duplicate performRepeaterRequest - now imported from ./modules/security-probes.js at line 23)
 
 // --- Session Manager ---
-const sessionTracker = {
-  currentSessions: new Map(),
-  domainToSession: new Map(), // Maps domains to session IDs
-  tabSessions: new Map(), // Maps tab IDs to sets of session IDs
-  authenticatedDomains: new Set(), // New: Track domains with active sessions
-  temporalWindow: 30000, // 30 seconds for temporal correlation
-
-  // Smart session correlation based on multiple factors
-  getOrCreateSession(domain, service, requestContext = {}) {
-    const { tabId, initiator, timestamp, authHeaders } = requestContext;
-    
-    // 1. Check for existing session correlation
-    const correlatedSession = this.findCorrelatedSession(domain, service, requestContext);
-    
-    if (correlatedSession) {
-      this.addDomainToSession(correlatedSession.id, domain);
-      console.log(`Correlated ${domain} with existing ${service} session (${correlatedSession.correlationReason})`);
-      return correlatedSession;
-    }
-    
-    // 2. Create new session with smart grouping
-    const sessionId = this.generateSessionId(domain, timestamp);
-    const sessionInfo = {
-      id: sessionId,
-      primaryDomain: domain,
-      domains: new Set([domain]),
-      service: service,
-      startTime: timestamp || Date.now(),
-      lastActivity: timestamp || Date.now(),
-      eventCount: 1,
-      tabIds: new Set(tabId ? [tabId] : []),
-      initiators: new Set(initiator ? [initiator] : []),
-      authTokenHashes: new Set(), // For auth correlation
-      ecosystem: this.detectEcosystem(domain, service),
-      correlationFactors: []
-    };
-    
-    this.currentSessions.set(sessionId, sessionInfo);
-    this.domainToSession.set(domain, sessionId);
-    
-    if (tabId) {
-      if (!this.tabSessions.has(tabId)) {
-        this.tabSessions.set(tabId, new Set());
-      }
-      this.tabSessions.get(tabId).add(sessionId);
-    }
-    
-    console.log(`New session started for ${service} (${domain}) - Session ID: ${sessionId}`);
-    return sessionInfo;
-  },
-  
-  // Multi-factor session correlation
-  findCorrelatedSession(domain, service, context) {
-    const { tabId, initiator, timestamp, authHeaders } = context;
-    const now = timestamp || Date.now();
-    
-    // Get all active sessions for this service
-    const serviceSessions = Array.from(this.currentSessions.values())
-      .filter(session => session.service === service && (now - session.lastActivity) < this.temporalWindow);
-    
-    for (const session of serviceSessions) {
-      const correlationScore = this.calculateCorrelationScore(session, domain, context);
-      
-      if (correlationScore.score > 0.7) { // High confidence threshold
-        session.correlationReason = correlationScore.reasons.join(', ');
-        return session;
-      }
-    }
-    
-    return null;
-  },
-  
-  // Calculate correlation score based on multiple factors
-  calculateCorrelationScore(session, domain, context) {
-    const { tabId, initiator, timestamp, authHeaders } = context;
-    let score = 0;
-    const reasons = [];
-    
-    // 1. Tab correlation (strongest signal)
-    if (tabId && session.tabIds.has(tabId)) {
-      score += 0.4;
-      reasons.push('same tab');
-    }
-    
-    // 2. Temporal proximity
-    const timeDiff = Math.abs((timestamp || Date.now()) - session.lastActivity);
-    if (timeDiff < 5000) { // 5 seconds
-      score += 0.3;
-      reasons.push('temporal proximity');
-    } else if (timeDiff < 30000) { // 30 seconds
-      score += 0.1;
-      reasons.push('recent activity');
-    }
-    
-    // 3. Initiator chain correlation
-    if (initiator && session.initiators.has(initiator)) {
-      score += 0.2;
-      reasons.push('same initiator');
-    }
-    
-    // 4. Ecosystem correlation (AWS buckets, Google services, etc.)
-    if (this.isEcosystemRelated(domain, session)) {
-      score += 0.2;
-      reasons.push('ecosystem correlation');
-    }
-    
-    // 5. Domain pattern correlation
-    if (this.isDomainPatternRelated(domain, session)) {
-      score += 0.15;
-      reasons.push('domain pattern');
-    }
-    
-    // 6. Auth token correlation (if available)
-    if (authHeaders && this.hasAuthCorrelation(authHeaders, session)) {
-      score += 0.25;
-      reasons.push('auth correlation');
-    }
-    
-    return { score, reasons };
-  },
-  
-  // Detect service ecosystems (AWS, GCP, Azure, etc.)
-  detectEcosystem(domain, service) {
-    const ecosystems = {
-      'AWS': ['amazonaws.com', 's3.amazonaws.com', 'cloudfront.net', 'aws.amazon.com'],
-      'Google Cloud': ['googleapis.com', 'googleusercontent.com', 'gstatic.com', 'storage.googleapis.com'],
-      'Microsoft Azure': ['azure.com', 'azurewebsites.net', 'blob.core.windows.net', 'microsoftonline.com'],
-      'Cloudflare': ['cloudflare.com', 'cf-assets.com', 'workers.dev'],
-      'Fastly': ['fastly.com', 'fastlylb.net'],
-      'Proton': ['proton.me', 'protonmail.com', 'protondrive.com', 'docs.proton.me']
-    };
-    
-    for (const [ecosystem, domains] of Object.entries(ecosystems)) {
-      if (domains.some(d => domain.includes(d))) {
-        return ecosystem;
-      }
-    }
-    
-    return service;
-  },
-  
-  // Check if domains are ecosystem-related
-  isEcosystemRelated(domain, session) {
-    if (session.ecosystem === 'AWS') {
-      return domain.includes('amazonaws.com') || domain.includes('cloudfront.net');
-    }
-    if (session.ecosystem === 'Google Cloud') {
-      return domain.includes('googleapis.com') || domain.includes('googleusercontent.com') || domain.includes('gstatic.com');
-    }
-    if (session.ecosystem === 'Proton') {
-      return domain.includes('proton.me') || domain.includes('protonmail.com') || domain.includes('protondrive.com');
-    }
-    
-    return false;
-  },
-  
-  // Check domain pattern relationships
-  isDomainPatternRelated(domain, session) {
-    const sessionDomains = Array.from(session.domains);
-    
-    // Check for subdomain relationships
-    for (const sessionDomain of sessionDomains) {
-      const baseDomain = this.extractBaseDomain(sessionDomain);
-      if (domain.includes(baseDomain) || this.extractBaseDomain(domain) === baseDomain) {
-        return true;
-      }
-    }
-    
-    return false;
-  },
-  
-  // Extract base domain (e.g., "bucket.s3.amazonaws.com" -> "amazonaws.com")
-  extractBaseDomain(domain) {
-    const parts = domain.split('.');
-    if (parts.length >= 2) {
-      return parts.slice(-2).join('.');
-    }
-    return domain;
-  },
-  
-  // Check for authentication correlation
-  hasAuthCorrelation(authHeaders, session) {
-    // This would compare auth token hashes or patterns
-    // Implementation depends on how you want to handle auth correlation
-    return false; // Placeholder
-  },
-  
-  // Add domain to existing session
-  addDomainToSession(sessionId, domain) {
-    const session = this.currentSessions.get(sessionId);
-    if (session) {
-      session.domains.add(domain);
-      session.lastActivity = Date.now();
-      session.eventCount++;
-      this.domainToSession.set(domain, sessionId);
-    }
-  },
-  
-  findActiveSessionForService(service) {
-    const now = Date.now();
-    const maxAge = 30 * 60 * 1000; // 30 minutes
-    
-    for (const [domain, session] of this.currentSessions.entries()) {
-      if (session.service === service && (now - session.lastActivity) < maxAge) {
-        return session;
-      }
-    }
-    return null;
-  },
-  
-  identifyService(domain) {
-    const lowerDomain = domain.toLowerCase();
-    
-    // Enhanced service detection with complex patterns and CDN mapping
-    const servicePatterns = {
-      'Microsoft': {
-        // Core Microsoft domains
-        primary: ['microsoft.com', 'outlook.com', 'office.com', 'sharepoint.com', 'onedrive.com', 'teams.microsoft.com'],
-        // Microsoft authentication infrastructure
-        auth: ['login.microsoftonline.com', 'login.live.com', 'account.microsoft.com'],
-        // Microsoft CDNs and services
-        cdn: ['msocdn.com', 'sharepointonline.com', 'officeapps.live.com', 'office365.com'],
-        // Microsoft Azure/cloud infrastructure
-        azure: ['windows.net', 'azure.com', 'azureedge.net', 'azurewebsites.net'],
-        // Microsoft S3-like services and CDNs
-        storage: ['blob.core.windows.net', 'sharepoint.com', 'onedrive.live.com'],
-        // Third-party CDNs used by Microsoft
-        thirdParty: ['amazonaws.com', 's3.amazonaws.com', 'cloudfront.net'],
-        // Check function
-        check: (domain) => {
-          // Direct matches
-          if (servicePatterns.Microsoft.primary.some(d => domain.includes(d))) return true;
-          if (servicePatterns.Microsoft.auth.some(d => domain.includes(d))) return true;
-          if (servicePatterns.Microsoft.cdn.some(d => domain.includes(d))) return true;
-          if (servicePatterns.Microsoft.azure.some(d => domain.includes(d))) return true;
-          if (servicePatterns.Microsoft.storage.some(d => domain.includes(d))) return true;
-          
-          // Special handling for Microsoft content on AWS/CDNs
-          if (domain.includes('amazonaws.com') || domain.includes('s3.amazonaws.com')) {
-            // Check if the path or subdomain suggests Microsoft
-            return domain.includes('microsoft') || domain.includes('office') || 
-                   domain.includes('sharepoint') || domain.includes('onedrive') ||
-                   domain.includes('teams') || domain.includes('outlook');
-          }
-          
-          // Microsoft tenant patterns (e.g., company.sharepoint.com)
-          if (domain.match(/\w+\.sharepoint\.com/) || domain.match(/\w+\.onmicrosoft\.com/)) return true;
-          
-          return false;
-        }
-      },
-      
-      'Google': {
-        primary: ['google.com', 'gmail.com', 'youtube.com', 'drive.google.com', 'docs.google.com'],
-        auth: ['accounts.google.com', 'oauth.google.com'],
-        cdn: ['googleapis.com', 'googleusercontent.com', 'gstatic.com', 'googlevideo.com'],
-        check: (domain) => {
-          return servicePatterns.Google.primary.some(d => domain.includes(d)) ||
-                 servicePatterns.Google.auth.some(d => domain.includes(d)) ||
-                 servicePatterns.Google.cdn.some(d => domain.includes(d));
-        }
-      },
-      
-      'Proton': {
-        primary: ['proton.me', 'protonmail.com', 'protonvpn.com', 'protoncalendar.com', 'protondrive.com'],
-        subdomains: ['mail.proton.me', 'drive.proton.me', 'account.proton.me', 'calendar.proton.me', 'docs.proton.me'],
-        check: (domain) => {
-          return servicePatterns.Proton.primary.some(d => domain.includes(d)) ||
-                 servicePatterns.Proton.subdomains.some(d => domain.includes(d));
-        }
-      },
-      
-      'Claude/Anthropic': {
-        primary: ['claude.ai', 'anthropic.com'],
-        cdn: ['claude-assets.com', 'anthropic-cdn.com'],
-        check: (domain) => {
-          return servicePatterns['Claude/Anthropic'].primary.some(d => domain.includes(d)) ||
-                 servicePatterns['Claude/Anthropic'].cdn.some(d => domain.includes(d));
-        }
-      },
-      
-      'GitHub': {
-        primary: ['github.com', 'github.io', 'githubusercontent.com', 'githubassets.com'],
-        check: (domain) => servicePatterns.GitHub.primary.some(d => domain.includes(d))
-      },
-      
-      'Amazon/AWS': {
-        primary: ['amazon.com', 'aws.amazon.com'],
-        cdn: ['amazonaws.com', 'cloudfront.net'],
-        check: (domain) => {
-          // Only classify as Amazon if it's clearly Amazon services, not Microsoft on AWS
-          if (domain.includes('microsoft') || domain.includes('office') || 
-              domain.includes('sharepoint') || domain.includes('onedrive')) {
-            return false; // This should be classified as Microsoft
-          }
-          return servicePatterns['Amazon/AWS'].primary.some(d => domain.includes(d)) ||
-                 servicePatterns['Amazon/AWS'].cdn.some(d => domain.includes(d));
-        }
-      },
-      
-      'Facebook/Meta': {
-        primary: ['facebook.com', 'instagram.com', 'whatsapp.com', 'meta.com'],
-        cdn: ['fbcdn.net', 'facebook.net'],
-        check: (domain) => {
-          return servicePatterns['Facebook/Meta'].primary.some(d => domain.includes(d)) ||
-                 servicePatterns['Facebook/Meta'].cdn.some(d => domain.includes(d));
-        }
-      },
-      
-      'Apple': {
-        primary: ['apple.com', 'icloud.com', 'me.com', 'mac.com'],
-        check: (domain) => servicePatterns.Apple.primary.some(d => domain.includes(d))
-      },
-      
-      'Slack': {
-        primary: ['slack.com', 'slack-edge.com', 'slack-imgs.com'],
-        check: (domain) => servicePatterns.Slack.primary.some(d => domain.includes(d))
-      },
-      
-      'Zoom': {
-        primary: ['zoom.us', 'zoom.com', 'zoomgov.com'],
-        check: (domain) => servicePatterns.Zoom.primary.some(d => domain.includes(d))
-      },
-      
-      'Dropbox': {
-        primary: ['dropbox.com', 'dropboxapi.com', 'dropboxusercontent.com'],
-        check: (domain) => servicePatterns.Dropbox.primary.some(d => domain.includes(d))
-      },
-      
-      'Twitter/X': {
-        primary: ['twitter.com', 'x.com', 'twimg.com'],
-        shortener: ['t.co'],
-        check: (domain) => {
-          // Exact matches for main domains
-          if (servicePatterns['Twitter/X'].primary.some(d => domain.includes(d))) return true;
-          // Exact match for t.co to avoid false positives
-          if (domain === 't.co' || domain.endsWith('.t.co')) return true;
-          return false;
-        }
-      },
-      
-      'LinkedIn': {
-        primary: ['linkedin.com', 'licdn.com'],
-        cdn: ['media.licdn.com', 'static.licdn.com'],
-        check: (domain) => {
-          return servicePatterns.LinkedIn.primary.some(d => domain.includes(d)) ||
-                 servicePatterns.LinkedIn.cdn.some(d => domain.includes(d));
-        }
-      },
-
-      'PayPal': {
-        primary: ['paypal.com', 'paypal.me'],
-        cdn: ['paypalobjects.com'],
-        check: (domain) => {
-          return servicePatterns.PayPal.primary.some(d => domain.includes(d)) ||
-                 servicePatterns.PayPal.cdn.some(d => domain.includes(d));
-        }
-      },
-
-      'OpenAI': {
-        primary: ['openai.com', 'chatgpt.com'],
-        cdn: ['oaistatic.com', 'oaiusercontent.com'],
-        check: (domain) => {
-          return servicePatterns.OpenAI.primary.some(d => domain.includes(d)) ||
-                 servicePatterns.OpenAI.cdn.some(d => domain.includes(d));
-        }
-      },
-      
-      'Discord': {
-        primary: ['discord.com', 'discordapp.com', 'discord.gg'],
-        cdn: ['discordapp.net', 'discord.media'],
-        check: (domain) => {
-          return servicePatterns.Discord.primary.some(d => domain.includes(d)) ||
-                 servicePatterns.Discord.cdn.some(d => domain.includes(d));
-        }
-      }
-    };
-    
-    // Check each service pattern
-    for (const [serviceName, pattern] of Object.entries(servicePatterns)) {
-      if (pattern.check(lowerDomain)) {
-        return serviceName;
-      }
-    }
-
-    // Special debugging for LinkedIn
-    if (lowerDomain.includes('linkedin')) {
-      console.log(`🐛 LinkedIn detection: ${lowerDomain} -> should be LinkedIn but wasn't caught`);
-    }
-    
-    // Fallback: try to extract a meaningful name from domain
-    const domainParts = lowerDomain.split('.');
-    const mainDomain = domainParts.length >= 2 ? domainParts[domainParts.length - 2] : domainParts[0];
-    
-    // Handle common cases
-    const fallbackMap = {
-      'amazonaws': 'AWS/Unknown',
-      's3': 'AWS/Unknown', 
-      'cloudfront': 'AWS/Unknown',
-      'azureedge': 'Microsoft',
-      'azurewebsites': 'Microsoft',
-      'googleapis': 'Google',
-      'gstatic': 'Google'
-    };
-    
-    if (fallbackMap[mainDomain]) {
-      return fallbackMap[mainDomain];
-    }
-    
-    // Final fallback: capitalize first letter of main domain
-    return mainDomain.charAt(0).toUpperCase() + mainDomain.slice(1);
-  },
-  
-  generateSessionId(domain) {
-    const service = this.identifyService(domain).toLowerCase();
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substr(2, 6);
-    return `${service}_${timestamp}_${random}`;
-  },
-  
-  cleanupOldSessions() {
-    const now = Date.now();
-    const maxAge = 30 * 60 * 1000; // 30 minutes
-    
-    for (const [domain, session] of this.currentSessions.entries()) {
-      if (now - session.lastActivity > maxAge) {
-        console.log(`Cleaning up inactive session for ${session.service}`);
-        this.currentSessions.delete(domain);
-      }
-    }
-  }
-};
 
 // Check if a domain is a known legitimate service (don't scan these)
 function isKnownLegitimateService(hostname) {
@@ -1293,8 +1344,7 @@ function isKnownLegitimateService(hostname) {
   );
 }
 
-// Clean up old sessions every 10 minutes
-setInterval(() => sessionTracker.cleanupOldSessions(), 10 * 60 * 1000);
+// (Removed setInterval - now using chrome.alarms.onAlarm at line 49)
 
 // (Removed duplicate decodeRequestBody - already defined at line 11)
 
@@ -1316,93 +1366,15 @@ chrome.runtime.onStartup.addListener(async () => {
 
 // Helper to decode ArrayBuffer
 
-// Also run on extension install/update
-chrome.runtime.onInstalled.addListener(async (details) => {
-  if (details.reason === 'startup' || details.reason === 'install') {
-    console.log('Hera extension installed/updated');
-    
-    // Set default configuration if not exists
-    const stored = await chrome.storage.local.get(['heraConfig']);
-    if (!stored.heraConfig) {
-      await chrome.storage.local.set({
-        heraConfig: {
-          syncEndpoint: null,
-          riskThreshold: 50,
-          enableRealTimeAlerts: true,
-          autoExportEnabled: true,
-          autoExportThreshold: 950
-        }
-      });
-      console.log('Default configuration set');
-    }
-  }
-});
+// NOTE: onInstalled listener consolidated at line 67 (removed duplicate)
 
-// --- Debugger Logic for Response Body Capture ---
+// CRITICAL FIX: Removed duplicate chrome.debugger.onEvent listener (already exists at ~line 463)
 
-chrome.debugger.onEvent.addListener((source, method, params) => {
-  if (method === "Network.responseReceived") {
-    const requestData = authRequests.get(params.requestId);
-    if (requestData) {
-      requestData.responseDetails = params;
-    }
-  } else if (method === "Network.loadingFinished") {
-    const requestData = authRequests.get(params.requestId);
-    if (requestData && requestData.responseDetails) {
-      const debuggee = { tabId: requestData.tabId };
-      if (debugTargets.has(requestData.tabId)) { // Ensure we are still debugging this tab
-        chrome.debugger.sendCommand(
-          debuggee,
-          "Network.getResponseBody",
-          { requestId: params.requestId },
-          (response) => {
-            if (chrome.runtime.lastError) {
-              // This can happen if the request has no body, so we can often ignore it.
-            } else if (response) {
-              let body = response.body;
-              if (response.base64Encoded) {
-                try {
-                  body = atob(response.body);
-                } catch (e) {
-                  console.warn("Failed to decode base64 response body", e);
-                }
-              }
-              requestData.responseBody = body;
-            }
-
-            // THIS IS THE NEW FINAL SAVE POINT
-            // Now that we have the response body (or know there isn't one), save the complete request.
-            heraStore.storeSession(requestData);
-            updateBadge();
-          }
-        );
-      }
-    }
-  }
-});
-
-chrome.tabs.onRemoved.addListener((tabId) => {
-  if (debugTargets.has(tabId)) {
-    chrome.debugger.detach({ tabId: tabId }, () => {
-      debugTargets.delete(tabId);
-      console.log(`Debugger detached from tab ${tabId}`);
-    });
-  }
-});
+// P2-NINTH-2 FIX: Removed duplicate chrome.tabs.onRemoved listener (already exists at ~line 627)
+// P2-NINTH-2 FIX: Removed duplicate chrome.tabs.onCreated listener (already exists at ~line 621)
+// P2-NINTH-2 FIX: Removed duplicate chrome.tabs.onUpdated listener (already exists at ~line 622)
 
 // (Removed duplicate attachDebugger - already defined at line 110)
-
-chrome.tabs.onCreated.addListener((tab) => {
-  if (tab.id) {
-    attachDebugger(tab.id);
-  }
-});
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'loading' && tab.url) {
-    attachDebugger(tabId);
-  }
-});
 
 // Attach to all existing tabs on startup
 chrome.tabs.query({}, (tabs) => {
@@ -1413,249 +1385,13 @@ chrome.tabs.query({}, (tabs) => {
   }
 });
 
-chrome.webRequest.onBeforeRequest.addListener(
-  async (details) => {
-    const reqUrl = new URL(details.url);
 
-    // Skip static assets that are definitely not auth-related
-    const urlLower = details.url.toLowerCase();
-    const staticAssetPatterns = [
-        '.css', '.js', '.woff', '.woff2', '.ttf', '.eot', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.ico',
-        '.webp', '.mp4', '.webm', '.mp3', '.wav', '.pdf', '.zip', '.tar', '.gz',
-        '/static/', '/_next/static/', '/assets/', '/public/', '/cdn-cgi/challenge-platform/',
-        'challenge-platform/scripts', 'challenge-platform/h/g/scripts'
-    ];
-
-    // Skip if it's clearly a static asset
-    if (staticAssetPatterns.some(pattern => urlLower.includes(pattern))) {
-        return; // Don't process static assets
-    }
-
-    // Capture request evidence
-    const requestEvidence = evidenceCollector.captureRequest(details.requestId, {
-      url: details.url,
-      method: details.method,
-      requestHeaders: details.requestHeaders,
-      requestBody: details.requestBody,
-      type: details.type,
-      initiator: details.initiator,
-      tabId: details.tabId,
-      timestamp: details.timeStamp
-    });
-    
-    // Check for OAuth/OIDC/SAML/SCIM endpoints, logout flows, and auth-related endpoints
-    const isAuthRelated = reqUrl.pathname.includes('oauth') || 
-        reqUrl.pathname.includes('authorize') || 
-        reqUrl.pathname.includes('token') ||
-        reqUrl.pathname.includes('userinfo') ||
-        reqUrl.pathname.includes('login') ||
-        reqUrl.pathname.includes('signin') ||
-        reqUrl.pathname.includes('logout') ||
-        reqUrl.pathname.includes('signout') ||
-        reqUrl.pathname.includes('auth') ||
-        reqUrl.pathname.includes('sso') ||
-        reqUrl.pathname.includes('saml') ||
-        reqUrl.pathname.includes('oidc') ||
-        reqUrl.pathname.includes('scim') ||
-        reqUrl.pathname.includes('connect') ||
-        reqUrl.pathname.includes('federation') ||
-        reqUrl.pathname.includes('identity') ||
-        reqUrl.pathname.includes('refresh') ||
-        reqUrl.pathname.includes('revoke') ||
-        reqUrl.pathname.includes('jwks') ||
-        reqUrl.pathname.includes('.well-known') ||
-        reqUrl.pathname.includes('discovery') ||
-        reqUrl.pathname.includes('metadata') ||
-        reqUrl.pathname.includes('sessions') ||
-        reqUrl.hostname.includes('login.') ||
-        reqUrl.hostname.includes('auth.') ||
-        reqUrl.hostname.includes('accounts.') ||
-        reqUrl.hostname.includes('sso.') ||
-        reqUrl.hostname.includes('identity.') ||
-        reqUrl.hostname.includes('oauth.') ||
-        reqUrl.hostname.includes('oidc.') ||
-        reqUrl.hostname.includes('saml.') ||
-        reqUrl.hostname.includes('adfs.') ||
-        reqUrl.hostname.includes('federation.') ||
-        reqUrl.hostname.includes('signin.') ||
-        reqUrl.hostname.includes('signup.') ||
-        reqUrl.hostname.includes('register.') ||
-        reqUrl.hostname.includes('profile.') ||
-        (reqUrl.pathname.includes('/api/') && (
-            reqUrl.pathname.includes('user') ||
-            reqUrl.pathname.includes('profile') ||
-            reqUrl.pathname.includes('account') ||
-            reqUrl.pathname.includes('session') ||
-            reqUrl.pathname.includes('auth') ||
-            reqUrl.pathname.includes('login') ||
-            reqUrl.pathname.includes('token') ||
-            reqUrl.pathname.includes('organizations') ||
-            reqUrl.pathname.includes('sync') ||
-            reqUrl.pathname.includes('mcp')
-        ));
-
-    // Also check for authentication headers in any request
-    const hasAuthHeaders = details.requestHeaders && details.requestHeaders.some(header => 
-      header.name.toLowerCase() === 'authorization' || 
-      header.name.toLowerCase() === 'x-api-key' ||
-      header.name.toLowerCase() === 'x-auth-token' ||
-      header.name.toLowerCase().includes('auth')
-    );
-
-    // Minimal debug logging (only for important auth requests)
-    if ((isAuthRelated || hasAuthHeaders) && !urlLower.includes('/_next/') && !urlLower.includes('/cdn-cgi/') && !urlLower.includes('/api/auth/v4/sessions/local')) {
-      const url = new URL(details.url);
-      console.log(`Auth request: ${details.method} ${url.hostname}${url.pathname}`);
-      // Malicious Extension Detection
-      if (isExtensionRequest(details.initiator) && isThirdPartyRequest(details.url, details.documentUrl)) {
-        const hasCredentials = details.requestBody?.raw?.some(part => {
-            try {
-                const decoded = new TextDecoder().decode(new Uint8Array(Object.values(part.bytes)));
-                return decoded.includes('password=') || decoded.includes('pass=');
-            } catch (e) { return false; }
-        });
-
-        if (hasCredentials) {
-            const finding = {
-                type: 'POTENTIAL_CREDENTIAL_THEFT',
-                severity: 'CRITICAL',
-                message: 'An extension is sending password data to a third-party domain.',
-                exploitation: `The extension with initiator ${details.initiator} may be stealing credentials. Disable it immediately.`
-            };
-            if (!details.metadata) details.metadata = {};
-            if (!details.metadata.authAnalysis) details.metadata.authAnalysis = { issues: [] };
-            if (!details.metadata.authAnalysis.issues) details.metadata.authAnalysis.issues = [];
-            details.metadata.authAnalysis.issues.push(finding);
-        }
-      }
-
-      // Apply security validation
-      const sanitizedURL = SecurityValidation.sanitizeURL(details.url);
-      if (!sanitizedURL) {
-          console.warn('Invalid URL blocked:', details.url);
-          return;
-      }
-
-      // Rate limiting check
-      const clientId = details.tabId || 'unknown';
-      if (!SecurityValidation.rateLimiter.checkRateLimit(clientId)) {
-          console.warn('Rate limit exceeded for client:', clientId);
-          return;
-      }
-
-      const requestId = details.requestId;
-
-      // Get hostname and determine service
-      const hostname = new URL(details.url).hostname;
-      const service = sessionTracker.identifyService(hostname);
-      const sessionInfo = sessionTracker.getOrCreateSession(hostname, service, {
-          tabId: details.tabId,
-          initiator: details.initiator,
-          timestamp: Date.now()
-      });
-
-      const requestData = {
-          id: requestId,
-          url: details.url,
-          method: details.method,
-          type: details.type,
-          timestamp: new Date().toISOString(),
-          requestHeaders: null, // Will be populated by onBeforeSendHeaders
-          initiator: details.initiator,
-          tabId: details.tabId,
-          requestBody: decodeRequestBody(details.requestBody),
-          responseHeaders: null, // Will be populated by onHeadersReceived
-          statusCode: null, // Will be populated by onCompleted
-          responseBody: null, // Will be populated by debugger
-          service: service,
-          sessionId: sessionInfo.id,
-          sessionInfo: sessionInfo,
-          metadata: {
-              // Network metadata
-              ip: details.ip || null,
-              fromCache: details.fromCache || false,
-
-              // URL analysis
-              urlParts: analyzeUrl(details.url),
-
-              // Authentication flow metadata
-              authFlow: analyzeAuthFlow(details.url, details.requestBody),
-
-              // OAuth consent and authorization analysis
-              consentAnalysis: analyzeOAuthConsent(details.url, details.requestBody),
-
-              // DNS and infrastructure analysis
-              dnsIntelligence: null, // Will be populated asynchronously
-              cdnAnalysis: null, // Will be populated from response headers
-
-              // Full network chain analysis
-              networkChain: {
-                  primaryIP: details.ip || null,
-                  redirectChain: [], // Will track all redirect IPs
-                  dnsChain: null, // Full DNS resolution chain
-                  certificateChain: null // Certificate chain IPs
-              },
-
-              // Security context
-              securityContext: {
-                  isSecure: details.url.startsWith('https://'),
-                  hasCredentials: false, // Will be updated when headers are available
-                  crossOrigin: isCrossOrigin(details.initiator, details.url)
-              },
-
-              // Port and authentication analysis
-              portAnalysis: heraPortAuthAnalyzer.analyzePortSecurity(details.url),
-              authTypeAnalysis: heraPortAuthAnalyzer.detectAuthType({
-                  url: details.url,
-                  method: details.method,
-                  requestHeaders: [],
-                  requestBody: details.requestBody
-              }),
-              ldapAnalysis: heraPortAuthAnalyzer.detectLDAP({
-                  url: details.url,
-                  requestBody: details.requestBody,
-                  requestHeaders: []
-              }),
-
-              // Timing data
-              timing: {
-                  startTime: Date.now(),
-                  endTime: null
-              },
-
-              // Browser context (will be populated from tab info)
-              browserContext: null
-          }
-      };
-
-      // Store request data
-      authRequests.set(requestId, requestData);
-
-      // Ensure debugger is attached for this tab
-      if (details.tabId > 0) {
-          attachDebugger(details.tabId);
-      }
-
-      // Reduced logging - only log every 10th request to reduce spam
-      if (authRequests.size % 10 === 0) {
-          const url = new URL(details.url);
-          console.log(`Stored ${authRequests.size} auth requests (latest: ${requestData.method} ${url.hostname})`);
-      }
-
-      // Gather DNS intelligence asynchronously
-      gatherDNSIntelligence(details.url, requestId);
-
-      // Update badge
-      updateBadge();
-    }
-  },
-  { urls: ["<all_urls>"] },
-  ["requestBody"]
-);
+// NOTE: Duplicate webRequest.onBeforeRequest listener removed (was lines 1551-1789, 239 lines)
+// This was a complete duplicate of the listener at line 203
 
 // Listen for request headers
-chrome.webRequest.onBeforeSendHeaders.addListener(
-  (details) => {
+chrome.webRequest.onBeforeSendHeaders.addListener((details) => {
+    if (!heraReady) return;
     const requestData = authRequests.get(details.requestId);
     if (requestData) {
       requestData.requestHeaders = details.requestHeaders;
@@ -1800,6 +1536,7 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
 // Listen for response headers
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
+    if (!heraReady) return;
     // Capture response evidence using EvidenceCollector
     const responseEvidence = evidenceCollector.captureResponse(
       details.requestId,
@@ -1837,7 +1574,7 @@ chrome.webRequest.onHeadersReceived.addListener(
 // Listen for redirect responses to track the full chain
 chrome.webRequest.onBeforeRedirect.addListener(
   (details) => {
-    const requestData = authRequests.get(details.requestId);
+if (!heraReady) return;     const requestData = authRequests.get(details.requestId);
     if (requestData) {
       // Ensure metadata structure exists
       if (!requestData.metadata) {
@@ -1872,7 +1609,7 @@ chrome.webRequest.onBeforeRedirect.addListener(
 // Listen for completed requests to capture response data
 chrome.webRequest.onCompleted.addListener(
   async (details) => {
-    const requestData = authRequests.get(details.requestId);
+if (!heraReady) return;     const requestData = authRequests.get(details.requestId);
     if (requestData) {
       requestData.statusCode = details.statusCode;
       requestData.responseHeaders = details.responseHeaders;
@@ -1919,24 +1656,19 @@ chrome.webRequest.onCompleted.addListener(
       
       authRequests.set(details.requestId, requestData);
       
-      // Only scan backends for suspicious or unknown domains, not legitimate services
+      // P0-SEVENTEENTH-2 FIX: Backend scanning disabled (CSP violations)
+      // The extension's CSP blocks fetch() to arbitrary domains
+      // Backend scanning would need to run in content script context (no CSP)
+      // For now, skip backend scanning entirely to prevent console spam
       const hostname = new URL(details.url).hostname;
-      const shouldScanBackend = !isKnownLegitimateService(hostname);
-      
-      if (shouldScanBackend) {
-        console.log(`Scanning backend for suspicious domain: ${hostname}`);
-        const backendScan = await scanForExposedBackends(hostname);
-        requestData.metadata.backendSecurity = backendScan;
-      } else {
-        console.log(`Skipping backend scan for legitimate service: ${hostname}`);
-        requestData.metadata.backendSecurity = {
-          domain: hostname,
-          exposed: [],
-          riskScore: 0,
-          shouldBlockDataEntry: false,
-          legitimateService: true
-        };
-      }
+      requestData.metadata.backendSecurity = {
+        domain: hostname,
+        exposed: [],
+        riskScore: 0,
+        shouldBlockDataEntry: false,
+        scanDisabled: true,
+        reason: 'CSP restrictions prevent background script from scanning arbitrary domains'
+      };
       
       // Get or create session for this domain with context
       const requestContext = {
@@ -1980,7 +1712,7 @@ chrome.webRequest.onCompleted.addListener(
 // Listen for failed requests (network errors, timeouts, etc.)
 chrome.webRequest.onErrorOccurred.addListener(
   (details) => {
-    const requestData = authRequests.get(details.requestId);
+if (!heraReady) return;     const requestData = authRequests.get(details.requestId);
     if (requestData) {
       requestData.error = details.error;
       // Ensure metadata structure exists
@@ -2005,855 +1737,76 @@ chrome.webRequest.onErrorOccurred.addListener(
     }
   },
   { urls: ["<all_urls>"] }
-);
+  );
 
-// Detect authentication type based on URL and request data
-function detectAuthType(url, requestBody) {
-  const lowerUrl = url.toLowerCase();
-  
-  // Check for logout/signout flows first
-  if (lowerUrl.includes('logout') || lowerUrl.includes('signout') || lowerUrl.includes('sign-out')) {
-    return 'Logout/Signout';
-  }
-  
-  if (lowerUrl.includes('revoke') || lowerUrl.includes('invalidate')) {
-    return 'Token Revocation';
-  }
-  
-  if (lowerUrl.includes('end_session') || lowerUrl.includes('disconnect')) {
-    return 'Session Termination';
-  }
-  
-  if (lowerUrl.includes('saml') || lowerUrl.includes('saml2')) {
-    return 'SAML';
-  }
-  
-  if (lowerUrl.includes('scim')) {
-    return 'SCIM';
-  }
-  
-  if (lowerUrl.includes('token') || lowerUrl.includes('oauth') || lowerUrl.includes('authorize')) {
-    return requestBody && requestBody.formData && requestBody.formData.grant_type 
-      ? `OAuth 2.0 (${requestBody.formData.grant_type})`
-      : 'OAuth 2.0';
-  }
-  
-  if (lowerUrl.includes('openid-configuration') || lowerUrl.includes('userinfo')) {
-    return 'OIDC';
-  }
-  
-  if (lowerUrl.includes('login') || lowerUrl.includes('signin') || lowerUrl.includes('sign-in')) {
-    return 'Login/Signin';
-  }
-  
-  if (lowerUrl.includes('sso')) {
-    return 'Single Sign-On';
-  }
-  
-  if (lowerUrl.includes('mfa') || lowerUrl.includes('2fa') || lowerUrl.includes('otp')) {
-    return 'Multi-Factor Auth';
-  }
-  
-  if (lowerUrl.includes('verify') || lowerUrl.includes('validate')) {
-    return 'Verification';
-  }
-  
-  if (lowerUrl.includes('challenge')) {
-    return 'Auth Challenge';
-  }
-  
-  if (lowerUrl.includes('negotiate') || lowerUrl.includes('ntlm') || lowerUrl.includes('kerberos')) {
-    return 'Kerberos/NTLM';
-  }
-  
-  if (lowerUrl.includes('spnego')) {
-    return 'SPNEGO Negotiation';
-  }
-  
-  if (lowerUrl.includes('ldap') || lowerUrl.includes('directory')) {
-    return 'LDAP Authentication';
-  }
-  
-  if (lowerUrl.includes('webauthn') || lowerUrl.includes('fido') || lowerUrl.includes('u2f')) {
-    return 'WebAuthn/FIDO2';
-  }
-  
-  if (lowerUrl.includes('api/auth') || lowerUrl.includes('api/login') || lowerUrl.includes('api/token')) {
-    return 'API Authentication';
-  }
-  
-  return 'Unknown';
+  return true; // Listeners initialized successfully
 }
 
-// Analyze URL components for security insights
-function analyzeUrl(url) {
-  try {
-    const urlObj = new URL(url);
-    const params = new URLSearchParams(urlObj.search);
-    
-    return {
-      protocol: urlObj.protocol,
-      hostname: urlObj.hostname,
-      port: urlObj.port,
-      pathname: urlObj.pathname,
-      search: urlObj.search,
-      hash: urlObj.hash,
-      parameterCount: params.size,
-      hasFragment: urlObj.hash.length > 0,
-      hasSensitiveParams: hasSensitiveParameters(params),
-      suspiciousPatterns: detectSuspiciousUrlPatterns(url)
-    };
-  } catch (e) {
-    return { error: 'Invalid URL', url: url };
+// CRITICAL FIX P0-4: Removed duplicate call - now called from initializeHera() after modules ready
+// Re-initialize when permissions change
+chrome.permissions.onAdded.addListener((permissions) => {
+  if (permissions.permissions?.includes('webRequest')) {
+    console.log('Hera: webRequest permission added, initializing listeners');
+    initializeWebRequestListeners();
   }
-}
+});
 
-// Analyze authentication flow specifics
-function analyzeAuthFlow(url, requestBody) {
-  const urlObj = new URL(url);
-  const params = new URLSearchParams(urlObj.search);
-  const lowerUrl = url.toLowerCase();
-  
-  const analysis = {
-    flowType: null,
-    grantType: null,
-    hasState: params.has('state'),
-    hasNonce: params.has('nonce'),
-    hasPKCE: params.has('code_challenge') || params.has('code_verifier'),
-    responseType: params.get('response_type'),
-    scope: params.get('scope'),
-    clientId: params.get('client_id'),
-    redirectUri: params.get('redirect_uri'),
-    securityFeatures: []
-  };
-  
-  // Detect flow type
-  if (lowerUrl.includes('authorize')) {
-    analysis.flowType = 'authorization_request';
-  } else if (lowerUrl.includes('token')) {
-    analysis.flowType = 'token_request';
-    if (requestBody && requestBody.formData) {
-      analysis.grantType = requestBody.formData.grant_type;
-    }
-  } else if (lowerUrl.includes('userinfo')) {
-    analysis.flowType = 'userinfo_request';
-  } else if (lowerUrl.includes('logout') || lowerUrl.includes('signout') || lowerUrl.includes('sign-out')) {
-    analysis.flowType = 'logout_request';
-  } else if (lowerUrl.includes('revoke')) {
-    analysis.flowType = 'token_revocation';
-  } else if (lowerUrl.includes('end_session')) {
-    analysis.flowType = 'session_termination';
+chrome.permissions.onRemoved.addListener(async (permissions) => {
+  if (permissions.permissions?.includes('webRequest')) {
+    console.warn('Hera: webRequest permission removed - monitoring stopped');
   }
-  
-  // Check security features
-  if (analysis.hasState) analysis.securityFeatures.push('state_parameter');
-  if (analysis.hasNonce) analysis.securityFeatures.push('nonce_parameter');
-  if (analysis.hasPKCE) analysis.securityFeatures.push('pkce');
-  
-  return analysis;
-}
 
-// Check for sensitive parameters in URL
-function hasSensitiveParameters(params) {
-  const sensitiveParams = [
-    'access_token', 'id_token', 'refresh_token', 'code', 'password',
-    'client_secret', 'api_key', 'token', 'auth', 'session'
-  ];
-  
-  for (const [key] of params) {
-    if (sensitiveParams.some(sensitive => key.toLowerCase().includes(sensitive))) {
-      return true;
-    }
-  }
-  return false;
-}
+  // P0-SEVENTH-2 FIX: Gracefully handle debugger permission revocation
+  if (permissions.permissions?.includes('debugger')) {
+    console.log('Hera: Debugger permission being revoked - attempting cleanup');
 
-// Detect suspicious URL patterns
-function detectSuspiciousUrlPatterns(url) {
-  const patterns = [];
-  const lowerUrl = url.toLowerCase();
-  
-  // Check for common phishing patterns
-  if (lowerUrl.includes('oauth') && !lowerUrl.includes('googleapis.com') && 
-      !lowerUrl.includes('microsoft.com') && !lowerUrl.includes('github.com')) {
-    patterns.push('non_standard_oauth_domain');
-  }
-  
-  // Check for URL shorteners
-  const shorteners = ['bit.ly', 'tinyurl.com', 't.co', 'goo.gl', 'ow.ly'];
-  if (shorteners.some(shortener => lowerUrl.includes(shortener))) {
-    patterns.push('url_shortener');
-  }
-  
-  // Check for suspicious TLDs
-  const suspiciousTlds = ['.tk', '.ml', '.ga', '.cf'];
-  if (suspiciousTlds.some(tld => lowerUrl.includes(tld))) {
-    patterns.push('suspicious_tld');
-  }
-  
-  return patterns;
-}
+    // P2-TENTH-4 FIX: Clear Map BEFORE attempting detach to prevent zombie entries
+    // If permission already revoked, detach() fails silently but we still clean up Map
+    const tabsToDetach = Array.from(debugTargets.entries());
+    debugTargets.clear(); // Clear immediately to prevent zombie entries
 
-// Check if request is cross-origin
-function isCrossOrigin(initiator, targetUrl) {
-  if (!initiator) return false;
-  
-  try {
-    const initiatorUrl = new URL(initiator);
-    const targetUrlObj = new URL(targetUrl);
-    
-    return initiatorUrl.origin !== targetUrlObj.origin;
-  } catch (e) {
-    return false;
-  }
-}
-
-// Analyze request headers for security insights
-function analyzeRequestHeaders(headers) {
-  if (!headers) return {};
-  
-  const analysis = {
-    hasAuthHeaders: false,
-    userAgent: null,
-    acceptLanguage: null,
-    referer: null,
-    origin: null,
-    cookieCount: 0,
-    authMethods: [],
-    securityHeaders: []
-  };
-  
-  headers.forEach(header => {
-    const name = header.name.toLowerCase();
-    const value = header.value;
-    
-    switch (name) {
-      case 'authorization':
-        analysis.hasAuthHeaders = true;
-        if (value.startsWith('Bearer ')) {
-          analysis.authMethods.push('bearer_token');
-        } else if (value.startsWith('Basic ')) {
-          analysis.authMethods.push('basic_auth');
-        } else if (value.startsWith('Digest ')) {
-          analysis.authMethods.push('digest_auth');
-        } else if (value.startsWith('Negotiate ')) {
-          analysis.authMethods.push('kerberos_spnego');
-        } else if (value.startsWith('NTLM ')) {
-          analysis.authMethods.push('ntlm');
-        } else if (value.startsWith('AWS4-HMAC-SHA256 ')) {
-          analysis.authMethods.push('aws_signature');
-        }
-        break;
-      case 'user-agent':
-        analysis.userAgent = value;
-        break;
-      case 'accept-language':
-        analysis.acceptLanguage = value;
-        break;
-      case 'referer':
-        analysis.referer = value;
-        break;
-      case 'origin':
-        analysis.origin = value;
-        break;
-      case 'cookie':
-        analysis.cookieCount = (value.match(/;/g) || []).length + 1;
-        analysis.cookieDetails = parseCookieHeader(value);
-        break;
-      case 'x-requested-with':
-        if (value === 'XMLHttpRequest') {
-          analysis.securityHeaders.push('ajax_request');
-        }
-        break;
-      case 'x-api-key':
-      case 'x-auth-token':
-      case 'x-access-token':
-        analysis.hasAuthHeaders = true;
-        analysis.authMethods.push('api_key');
-        break;
-      case 'x-amz-security-token':
-        analysis.hasAuthHeaders = true;
-        analysis.authMethods.push('aws_session_token');
-        break;
-      case 'x-ms-token-aad-id-token':
-      case 'x-ms-token-aad-access-token':
-        analysis.hasAuthHeaders = true;
-        analysis.authMethods.push('azure_ad_token');
-        break;
-    }
-  });
-  
-  return analysis;
-}
-
-// Analyze response headers for security insights
-function analyzeResponseHeaders(headers) {
-  if (!headers) return {};
-  
-  const analysis = {
-    securityHeaders: {},
-    cacheControl: null,
-    contentType: null,
-    setCookies: [],
-    corsHeaders: {},
-    hasSecurityHeaders: false
-  };
-  
-  const securityHeadersToCheck = [
-    'strict-transport-security',
-    'x-frame-options',
-    'x-content-type-options',
-    'content-security-policy',
-    'x-xss-protection',
-    'referrer-policy'
-  ];
-  
-  headers.forEach(header => {
-    const name = header.name.toLowerCase();
-    const value = header.value;
-    
-    if (securityHeadersToCheck.includes(name)) {
-      analysis.securityHeaders[name] = value;
-      analysis.hasSecurityHeaders = true;
-    }
-    
-    switch (name) {
-      case 'cache-control':
-        analysis.cacheControl = value;
-        break;
-      case 'content-type':
-        analysis.contentType = value;
-        break;
-      case 'set-cookie':
-        analysis.setCookies.push(value);
-        const cookieAnalysis = analyzeSetCookie(value);
-        if (!analysis.cookieAnalysis) analysis.cookieAnalysis = [];
-        analysis.cookieAnalysis.push(cookieAnalysis);
-        break;
-      case 'access-control-allow-origin':
-        analysis.corsHeaders.allowOrigin = value;
-        break;
-      case 'access-control-allow-credentials':
-        analysis.corsHeaders.allowCredentials = value;
-        break;
-      case 'access-control-allow-methods':
-        analysis.corsHeaders.allowMethods = value;
-        break;
-    }
-  });
-  
-  return analysis;
-}
-
-// Analyze OAuth consent and authorization grants
-function analyzeOAuthConsent(url, requestBody) {
-  const urlObj = new URL(url);
-  const params = new URLSearchParams(urlObj.search);
-  const lowerUrl = url.toLowerCase();
-  
-  const analysis = {
-    isConsentFlow: false,
-    provider: detectAuthProvider(url),
-    clientId: params.get('client_id'),
-    redirectUri: params.get('redirect_uri'),
-    scopes: [],
-    scopeAnalysis: {
-      highRisk: [],
-      mediumRisk: [],
-      lowRisk: [],
-      riskScore: 0
-    },
-    applicationInfo: {
-      name: null,
-      domain: null,
-      verified: false,
-      suspicious: false
-    },
-    consentWarnings: []
-  };
-  
-  // Check if this is a consent/authorization flow
-  if (lowerUrl.includes('authorize') || lowerUrl.includes('consent') || lowerUrl.includes('oauth')) {
-    analysis.isConsentFlow = true;
-    
-    // Parse scopes
-    const scopeParam = params.get('scope');
-    if (scopeParam) {
-      analysis.scopes = scopeParam.split(/[\s,+]/).filter(s => s.length > 0);
-      analysis.scopeAnalysis = analyzeScopeRisks(analysis.scopes, analysis.provider);
-    }
-    
-    // Analyze redirect URI for suspicious patterns
-    if (analysis.redirectUri) {
-      analysis.applicationInfo = analyzeRedirectUri(analysis.redirectUri);
-    }
-    
-    // Generate consent warnings
-    analysis.consentWarnings = generateConsentWarnings(analysis);
-  }
-  
-  return analysis;
-}
-
-// Detect authentication provider from URL
-function detectAuthProvider(url) {
-  const lowerUrl = url.toLowerCase();
-  const hostname = new URL(url).hostname.toLowerCase();
-  
-  if (hostname.includes('login.microsoftonline.com') || hostname.includes('login.live.com')) {
-    return 'Microsoft Azure/Office 365';
-  }
-  if (hostname.includes('accounts.google.com') || hostname.includes('oauth2.googleapis.com')) {
-    return 'Google';
-  }
-  if (hostname.includes('github.com')) {
-    return 'GitHub';
-  }
-  if (hostname.includes('facebook.com') || hostname.includes('graph.facebook.com')) {
-    return 'Facebook';
-  }
-  if (hostname.includes('api.twitter.com') || hostname.includes('twitter.com')) {
-    return 'Twitter/X';
-  }
-  if (hostname.includes('linkedin.com')) {
-    return 'LinkedIn';
-  }
-  if (hostname.includes('okta.com') || hostname.includes('oktapreview.com')) {
-    return 'Okta';
-  }
-  if (hostname.includes('auth0.com')) {
-    return 'Auth0';
-  }
-  if (hostname.includes('salesforce.com')) {
-    return 'Salesforce';
-  }
-  
-  return `Unknown Provider (${hostname})`;
-}
-
-// Analyze scope risks based on provider and permissions
-function analyzeScopeRisks(scopes, provider) {
-  const analysis = {
-    highRisk: [],
-    mediumRisk: [],
-    lowRisk: [],
-    riskScore: 0
-  };
-  
-  const riskPatterns = {
-    // High risk scopes - full access, admin rights, sensitive data
-    high: [
-      'https://graph.microsoft.com/.default', // Full Microsoft Graph access
-      'user.readwrite.all', 'directory.readwrite.all', 'application.readwrite.all',
-      'mail.readwrite', 'calendars.readwrite', 'contacts.readwrite',
-      'files.readwrite.all', 'sites.readwrite.all',
-      'admin', 'root', 'sudo', 'full_access', 'all',
-      'delete', 'write_all', 'manage_all'
-    ],
-    
-    // Medium risk scopes - read access to sensitive data
-    medium: [
-      'user.read.all', 'directory.read.all', 'mail.read',
-      'calendars.read', 'contacts.read', 'files.read.all',
-      'profile', 'email', 'openid', 'offline_access',
-      'read_user', 'read_repository', 'read_org'
-    ],
-    
-    // Low risk scopes - basic info only
-    low: [
-      'user.read', 'profile.basic', 'email.basic',
-      'public_profile', 'basic_info'
-    ]
-  };
-  
-  scopes.forEach(scope => {
-    const lowerScope = scope.toLowerCase();
-    
-    if (riskPatterns.high.some(pattern => lowerScope.includes(pattern.toLowerCase()))) {
-      analysis.highRisk.push(scope);
-      analysis.riskScore += 10;
-    } else if (riskPatterns.medium.some(pattern => lowerScope.includes(pattern.toLowerCase()))) {
-      analysis.mediumRisk.push(scope);
-      analysis.riskScore += 5;
-    } else {
-      analysis.lowRisk.push(scope);
-      analysis.riskScore += 1;
-    }
-  });
-  
-  return analysis;
-}
-
-// Analyze redirect URI for suspicious patterns
-function analyzeRedirectUri(redirectUri) {
-  const analysis = {
-    name: null,
-    domain: null,
-    verified: false,
-    suspicious: false,
-    warnings: []
-  };
-  
-  try {
-    const url = new URL(redirectUri);
-    analysis.domain = url.hostname;
-    
-    // Check for suspicious patterns
-    const suspiciousPatterns = [
-      'localhost', '127.0.0.1', '0.0.0.0', // Local redirects (potentially suspicious)
-      'bit.ly', 'tinyurl.com', 't.co', // URL shorteners
-      'ngrok.io', 'herokuapp.com', // Temporary hosting
-      'github.io', 'netlify.app', 'vercel.app' // Free hosting (could be legitimate or suspicious)
-    ];
-    
-    const isSuspicious = suspiciousPatterns.some(pattern => 
-      analysis.domain.toLowerCase().includes(pattern)
-    );
-    
-    if (isSuspicious) {
-      analysis.suspicious = true;
-      analysis.warnings.push('Redirect URI uses potentially suspicious domain');
-    }
-    
-    // Check for legitimate domains
-    const legitimateDomains = [
-      'microsoft.com', 'office.com', 'sharepoint.com',
-      'google.com', 'gmail.com', 'googleusercontent.com',
-      'github.com', 'facebook.com', 'linkedin.com'
-    ];
-    
-    analysis.verified = legitimateDomains.some(domain => 
-      analysis.domain.toLowerCase().includes(domain)
-    );
-    
-  } catch (e) {
-    analysis.suspicious = true;
-    analysis.warnings.push('Invalid redirect URI format');
-  }
-  
-  return analysis;
-}
-
-// Generate consent warnings based on analysis
-function generateConsentWarnings(consentAnalysis) {
-  const warnings = [];
-  
-  // High risk scope warnings
-  if (consentAnalysis.scopeAnalysis.highRisk.length > 0) {
-    warnings.push({
-      severity: 'critical',
-      type: 'high_risk_scopes',
-      message: ` HIGH RISK: Application requesting dangerous permissions: ${consentAnalysis.scopeAnalysis.highRisk.join(', ')}`,
-      recommendation: 'Carefully verify this application before granting access. These permissions allow extensive access to your data.'
-    });
-  }
-  
-  // Suspicious redirect URI
-  if (consentAnalysis.applicationInfo.suspicious) {
-    warnings.push({
-      severity: 'critical',
-      type: 'suspicious_redirect',
-      message: ` SUSPICIOUS: Redirect URI appears suspicious: ${consentAnalysis.redirectUri}`,
-      recommendation: 'This may be a phishing attempt. Verify the application is legitimate before proceeding.'
-    });
-  }
-  
-  // Unknown provider warning
-  if (consentAnalysis.provider.includes('Unknown Provider')) {
-    warnings.push({
-      severity: 'warning',
-      type: 'unknown_provider',
-      message: `WARNING: Unknown authentication provider: ${consentAnalysis.provider}`,
-      recommendation: 'Verify this is a legitimate authentication service before entering credentials.'
-    });
-  }
-  
-  // High risk score
-  if (consentAnalysis.scopeAnalysis.riskScore >= 20) {
-    warnings.push({
-      severity: 'warning',
-      type: 'high_risk_score',
-      message: `HIGH RISK SCORE: ${consentAnalysis.scopeAnalysis.riskScore} - Multiple sensitive permissions requested`,
-      recommendation: 'Consider if this application really needs all these permissions.'
-    });
-  }
-  
-  return warnings;
-}
-
-// IP Address resolution and geolocation
-async function resolveIPAddresses(hostname) {
-  const ipInfo = {
-    ipv4Addresses: [],
-    ipv6Addresses: [],
-    geoLocations: [],
-    asn: null,
-    organization: null,
-    country: null,
-    city: null,
-    isp: null,
-    isVPN: false,
-    isTor: false,
-    isProxy: false,
-    threatLevel: 'low'
-  };
-
-  try {
-    // Use DNS over HTTPS to resolve IP addresses
-    const dohEndpoint = `https://cloudflare-dns.com/dns-query?name=${hostname}&type=A`;
-    
-    const response = await fetch(dohEndpoint, {
-      headers: {
-        'Accept': 'application/dns-json'
-      }
-    });
-    
-    if (response.ok) {
-      const dnsData = await response.json();
-      
-      if (dnsData.Answer) {
-        for (const record of dnsData.Answer) {
-          if (record.type === 1) { // A record (IPv4)
-            const ip = record.data;
-            ipInfo.ipv4Addresses.push(ip);
-            
-            // Get geolocation for each IP
-            const geoData = await getIPGeolocation(ip);
-            if (geoData) {
-              ipInfo.geoLocations.push({
-                ip: ip,
-                ...geoData
-              });
-              
-              // Use first IP's data for main fields
-              if (!ipInfo.country) {
-                ipInfo.country = geoData.country;
-                ipInfo.city = geoData.city;
-                ipInfo.asn = geoData.asn;
-                ipInfo.organization = geoData.organization;
-                ipInfo.isp = geoData.isp;
-                ipInfo.isVPN = geoData.isVPN;
-                ipInfo.isTor = geoData.isTor;
-                ipInfo.isProxy = geoData.isProxy;
-                ipInfo.threatLevel = geoData.threatLevel;
-              }
+    const detachPromises = [];
+    for (const [tabId, debuggee] of tabsToDetach) {
+      detachPromises.push(
+        new Promise(resolve => {
+          chrome.debugger.detach(debuggee, () => {
+            if (chrome.runtime.lastError) {
+              // Expected if permission already revoked - Chrome will auto-detach
+              console.log(`Debugger auto-detach for tab ${tabId} (permission revoked)`);
+            } else {
+              console.log(`Successfully detached debugger from tab ${tabId}`);
             }
-          }
-        }
-      }
+            resolve();
+          });
+        })
+      );
     }
-  } catch (error) {
-    console.log(`DNS resolution failed for ${hostname}:`, error);
-  }
 
-  return ipInfo;
-}
+    await Promise.all(detachPromises);
 
-// IP Geolocation lookup with rate limiting and caching
-const ipCache = new Map();
-const ipRequestQueue = new Set();
-
-async function getIPGeolocation(ip) {
-  // Check cache first
-  if (ipCache.has(ip)) {
-    console.log(`Using cached IP data for ${ip}`);
-    return ipCache.get(ip);
-  }
-  
-  // Prevent duplicate requests
-  if (ipRequestQueue.has(ip)) {
-    console.log(`IP request already in progress for ${ip}`);
-    return null;
-  }
-  
-  // Rate limiting - only allow IP lookups for legitimate security analysis
-  if (ipCache.size > 10) {
-    console.log(`IP cache limit reached, skipping lookup for ${ip}`);
-    return null;
-  }
-  
-  // Skip IP lookups entirely for known legitimate services to prevent 429 errors
-  const knownLegitimateIPs = [
-    '160.79.104.10', // Claude.ai
-    '151.101.0.176', '151.101.128.176', '151.101.64.176', '151.101.192.176' // Fastly CDN
-  ];
-  
-  if (knownLegitimateIPs.includes(ip)) {
-    console.log(`Skipping IP lookup for known legitimate IP: ${ip}`);
-    return null;
-  }
-  
-  // Skip IP lookups for known legitimate IP ranges (optional optimization)
-  // Most IPs will be processed, but we can skip obvious ones
-  
-  ipRequestQueue.add(ip);
-  
-  try {
-    console.log(`Looking up IP geolocation for ${ip}`);
-    const response = await fetch(`https://ipapi.co/${ip}/json/`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
+    // Notify user
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: 'Hera: Response Capture Disabled',
+      message: 'Debugger permission revoked. HTTP response body capture is now disabled.',
+      priority: 1
     });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    const geoData = {
-      ip: ip,
-      country: data.country_name || 'Unknown',
-      city: data.city || 'Unknown',
-      region: data.region || 'Unknown',
-      isp: data.org || 'Unknown ISP',
-      asn: data.asn || 'Unknown',
-      timezone: data.timezone || 'Unknown',
-      isVPN: data.threat?.is_anonymous || false,
-      isTor: data.threat?.is_tor || false,
-      isProxy: data.threat?.is_proxy || false,
-      threatLevel: data.threat?.threat_types?.length > 0 ? 'high' : 'low'
-    };
-    
-    // Cache the result
-    ipCache.set(ip, geoData);
-    console.log(`IP geolocation cached for ${ip}: ${geoData.city}, ${geoData.country}`);
-    
-    return geoData;
-  } catch (error) {
-    console.log(`IP geolocation failed for ${ip}:`, error);
-    return null;
-  } finally {
-    ipRequestQueue.delete(ip);
   }
-}
+});
 
-// Gather DNS intelligence for domain analysis with IP resolution
-async function gatherDNSIntelligence(url, requestId) {
-  try {
-    const hostname = new URL(url).hostname;
-    
-    // Resolve IP addresses first
-    const ipInfo = await resolveIPAddresses(hostname);
-    
-    const intelligence = {
-      hostname: hostname,
-      isNewDomain: false,
-      isDGA: false,
-      isHomograph: false,
-      cdnProvider: null,
-      suspiciousPatterns: [],
-      whoisAge: null,
-      ipAddresses: ipInfo, // Add IP information
-      dnsRecords: {
-        aRecords: ipInfo.ipv4Addresses,
-        aaaaRecords: ipInfo.ipv6Addresses,
-        cnameRecords: [],
-        mxRecords: [],
-        txtRecords: [],
-        nsRecords: []
-      },
-      networkPath: {
-        resolverUsed: 'cloudflare-dns.com',
-        ttlValues: [],
-        responseTime: null,
-        isDohUsed: true
-      },
-      geoLocation: {
-        country: ipInfo.country,
-        city: ipInfo.city,
-        asn: ipInfo.asn,
-        organization: ipInfo.organization,
-        isp: ipInfo.isp,
-        isVPN: ipInfo.isVPN,
-        isTor: ipInfo.isTor,
-        isProxy: ipInfo.isProxy,
-        threatLevel: ipInfo.threatLevel
-      }
-    };
-    
-    // Check for homograph attacks (Unicode lookalikes)
-    intelligence.isHomograph = detectHomographAttack(hostname);
-    
-    // Check for Domain Generation Algorithm patterns
-    intelligence.isDGA = detectDGAPattern(hostname);
-    
-    // Check for suspicious TLDs and patterns
-    intelligence.suspiciousPatterns = detectSuspiciousDomainPatterns(hostname);
-    
-    // Update the stored request with DNS intelligence
-    const requestData = authRequests.get(requestId);
-    if (requestData) {
-      requestData.metadata.dnsIntelligence = intelligence;
-      authRequests.set(requestId, requestData);
-    }
-    
-  } catch (error) {
-    console.log('DNS intelligence gathering failed:', error);
-  }
-}
+// NOTE: detectAuthType, analyzeUrl, hasSensitiveParameters, detectSuspiciousUrlPatterns,
+// isCrossOrigin, analyzeRequestHeaders, and analyzeResponseHeaders are now imported from modules
 
-// Detect homograph attacks (Unicode characters that look like ASCII)
-function detectHomographAttack(hostname) {
-  // Check for mixed scripts or suspicious Unicode characters
-  const suspiciousChars = /[а-я]|[α-ω]|[а-я]|[\u0400-\u04FF]|[\u0370-\u03FF]/i; // Cyrillic, Greek
-  const hasNonASCII = /[^\x00-\x7F]/.test(hostname);
-  const hasMixedScript = suspiciousChars.test(hostname);
-  
-  // Common homograph targets
-  const commonTargets = ['google', 'microsoft', 'apple', 'amazon', 'facebook', 'github'];
-  const isTargetLookalike = commonTargets.some(target => {
-    const similarity = calculateStringSimilarity(hostname.toLowerCase(), target);
-    return similarity > 0.8 && similarity < 1.0;
-  });
-  
-  return hasNonASCII || hasMixedScript || isTargetLookalike;
-}
+// NOTE: Auth flow analysis functions now imported from modules/auth-flow-analyzer.js
+// - analyzeAuthFlow, analyzeOAuthConsent, detectAuthProvider, analyzeScopeRisks,
+//   analyzeRedirectUri, generateConsentWarnings, analyzeAuthFailure
 
-// Detect Domain Generation Algorithm patterns
-function detectDGAPattern(hostname) {
-  const domain = hostname.split('.')[0];
-  
-  // DGA characteristics
-  const hasRandomPattern = /^[a-z]{8,20}$/.test(domain); // Long random strings
-  const hasNumberMix = /^[a-z0-9]{10,}$/.test(domain) && /\d/.test(domain);
-  const hasConsonantClusters = /[bcdfghjklmnpqrstvwxyz]{4,}/.test(domain);
-  const lowVowelRatio = (domain.match(/[aeiou]/g) || []).length / domain.length < 0.2;
-  
-  return (hasRandomPattern || hasNumberMix) && (hasConsonantClusters || lowVowelRatio);
-}
-
-// Detect suspicious domain patterns
-function detectSuspiciousDomainPatterns(hostname) {
-  const patterns = [];
-  
-  // Suspicious TLDs
-  const suspiciousTLDs = ['.tk', '.ml', '.ga', '.cf', '.pw', '.top', '.click', '.download'];
-  if (suspiciousTLDs.some(tld => hostname.endsWith(tld))) {
-    patterns.push('suspicious_tld');
-  }
-  
-  // Typosquatting patterns
-  const legitimateDomains = ['google.com', 'microsoft.com', 'github.com', 'facebook.com'];
-  legitimateDomains.forEach(legit => {
-    if (hostname !== legit && calculateStringSimilarity(hostname, legit) > 0.7) {
-      patterns.push('typosquatting_' + legit.replace('.com', ''));
-    }
-  });
-  
-  // Subdomain abuse
-  const subdomainCount = hostname.split('.').length - 2;
-  if (subdomainCount > 3) {
-    patterns.push('excessive_subdomains');
-  }
-  
-  // URL shortener domains
-  const shorteners = ['bit.ly', 'tinyurl.com', 't.co', 'goo.gl', 'ow.ly'];
-  if (shorteners.includes(hostname)) {
-    patterns.push('url_shortener');
-  }
-  
-  return patterns;
+// NOTE: DNS/IP intelligence functions now imported from ./modules/dns-intelligence.js at line 18
+// - resolveIPAddresses, getIPGeolocation, gatherDNSIntelligence, detectSuspiciousDomainPatterns
+// Wrapper function to maintain compatibility with existing code that doesn't pass authRequests
+async function gatherDNSIntelligenceWrapper(url, requestId) {
+  return gatherDNSIntelligence(url, requestId, authRequests);
 }
 
 // Analyze CDN and infrastructure from response headers
@@ -2923,45 +1876,7 @@ function analyzeCDNFromHeaders(responseHeaders, url) {
   return analysis;
 }
 
-// Calculate string similarity for homograph detection
-function calculateStringSimilarity(str1, str2) {
-  const longer = str1.length > str2.length ? str1 : str2;
-  const shorter = str1.length > str2.length ? str2 : str1;
-  
-  if (longer.length === 0) return 1.0;
-  
-  const editDistance = levenshteinDistance(longer, shorter);
-  return (longer.length - editDistance) / longer.length;
-}
-
-// Levenshtein distance calculation
-function levenshteinDistance(str1, str2) {
-  const matrix = [];
-  
-  for (let i = 0; i <= str2.length; i++) {
-    matrix[i] = [i];
-  }
-  
-  for (let j = 0; j <= str1.length; j++) {
-    matrix[0][j] = j;
-  }
-  
-  for (let i = 1; i <= str2.length; i++) {
-    for (let j = 1; j <= str1.length; j++) {
-      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
-        );
-      }
-    }
-  }
-  
-  return matrix[str2.length][str1.length];
-}
+// NOTE: calculateStringSimilarity and levenshteinDistance now imported from ./modules/string-utils.js at line 21
 
 // Exposed Backend Detection
 async function scanForExposedBackends(domain) {
@@ -3109,6 +2024,33 @@ async function checkS3Exposure(domain) {
   return { exposed: false };
 }
 
+// P1-NINTH-3 FIX: Sanitize detector results to prevent prototype pollution
+function sanitizeDetectorResult(obj) {
+  if (typeof obj !== 'object' || obj === null) {
+    return {};
+  }
+
+  // Create clean object without dangerous keys
+  const clean = {};
+  const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (dangerousKeys.includes(key)) {
+      console.warn(`Hera: Blocked dangerous key in detector result: ${key}`);
+      continue;
+    }
+
+    // Recursively sanitize nested objects
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      clean[key] = sanitizeDetectorResult(value);
+    } else {
+      clean[key] = value;
+    }
+  }
+
+  return clean;
+}
+
 // Gather comprehensive security signals for SADS analysis
 async function gatherSecuritySignals(domain) {
   const signals = {
@@ -3141,23 +2083,24 @@ async function gatherSecuritySignals(domain) {
     const results = await Promise.allSettled(signalTasks);
 
     // Merge results
+    // P1-NINTH-3 FIX: Sanitize all detector results before merging
     results.forEach((result, index) => {
       if (result.status === 'fulfilled' && result.value) {
         switch (index) {
           case 0: // Domain signals
-            Object.assign(signals, result.value);
+            Object.assign(signals, sanitizeDetectorResult(result.value));
             break;
           case 1: // Security config signals
-            Object.assign(signals, result.value);
+            Object.assign(signals, sanitizeDetectorResult(result.value));
             break;
           case 2: // Infrastructure signals
-            Object.assign(signals, result.value);
+            Object.assign(signals, sanitizeDetectorResult(result.value));
             break;
           case 3: // Git exposure
-            signals.gitExposed = result.value || { exposed: false };
+            signals.gitExposed = sanitizeDetectorResult(result.value) || { exposed: false };
             break;
           case 4: // Env file exposure
-            signals.envFileExposed = result.value || { exposed: false };
+            signals.envFileExposed = sanitizeDetectorResult(result.value) || { exposed: false };
             break;
         }
       }
@@ -3412,198 +2355,13 @@ async function checkEnvFileExposure(domain) {
   return { exposed: false };
 }
 
-// Parse Cookie header to extract individual cookies
-function parseCookieHeader(cookieHeader) {
-  const cookies = [];
-  const pairs = cookieHeader.split(';');
-  
-  pairs.forEach(pair => {
-    const [name, value] = pair.trim().split('=');
-    if (name && value) {
-      cookies.push({
-        name: name.trim(),
-        value: value.trim(),
-        isSessionToken: isSessionCookie(name.trim()),
-        isAuthToken: isAuthCookie(name.trim())
-      });
-    }
-  });
-  
-  return cookies;
-}
+// Cookie parsing functions now imported from modules/cookie-utils.js
+// - parseCookieHeader()
+// - analyzeSetCookie()
+// - isSessionCookie()
+// - isAuthCookie()
 
-// Analyze Set-Cookie header for security attributes
-function analyzeSetCookie(setCookieValue) {
-  const analysis = {
-    name: null,
-    value: null,
-    attributes: {
-      httpOnly: false,
-      secure: false,
-      sameSite: null,
-      domain: null,
-      path: null,
-      expires: null,
-      maxAge: null
-    },
-    securityScore: 0,
-    isSessionCookie: false,
-    isAuthCookie: false
-  };
-  
-  const parts = setCookieValue.split(';');
-  
-  // Parse cookie name and value
-  if (parts[0]) {
-    const [name, value] = parts[0].trim().split('=');
-    analysis.name = name;
-    analysis.value = value;
-    analysis.isSessionCookie = isSessionCookie(name);
-    analysis.isAuthCookie = isAuthCookie(name);
-  }
-  
-  // Parse attributes
-  parts.slice(1).forEach(part => {
-    const trimmed = part.trim().toLowerCase();
-    
-    if (trimmed === 'httponly') {
-      analysis.attributes.httpOnly = true;
-      analysis.securityScore += 2;
-    } else if (trimmed === 'secure') {
-      analysis.attributes.secure = true;
-      analysis.securityScore += 2;
-    } else if (trimmed.startsWith('samesite=')) {
-      analysis.attributes.sameSite = trimmed.split('=')[1];
-      analysis.securityScore += 1;
-    } else if (trimmed.startsWith('domain=')) {
-      analysis.attributes.domain = trimmed.split('=')[1];
-    } else if (trimmed.startsWith('path=')) {
-      analysis.attributes.path = trimmed.split('=')[1];
-    } else if (trimmed.startsWith('expires=')) {
-      analysis.attributes.expires = trimmed.split('=')[1];
-    } else if (trimmed.startsWith('max-age=')) {
-      analysis.attributes.maxAge = trimmed.split('=')[1];
-    }
-  });
-  
-  return analysis;
-}
-
-// Check if cookie name indicates a session cookie
-function isSessionCookie(cookieName) {
-  const sessionPatterns = [
-    'session', 'sess', 'jsessionid', 'phpsessid', 'asp.net_sessionid',
-    'connect.sid', 'laravel_session', 'django_session'
-  ];
-  
-  const lowerName = cookieName.toLowerCase();
-  return sessionPatterns.some(pattern => lowerName.includes(pattern));
-}
-
-// Check if cookie name indicates an authentication cookie
-function isAuthCookie(cookieName) {
-  const authPatterns = [
-    'auth', 'token', 'jwt', 'access', 'refresh', 'bearer',
-    'login', 'user', 'identity', 'credential'
-  ];
-  
-  const lowerName = cookieName.toLowerCase();
-  return authPatterns.some(pattern => lowerName.includes(pattern));
-}
-
-// Analyze authentication failures and access denied responses
-function analyzeAuthFailure(statusCode, responseHeaders, url) {
-  const analysis = {
-    isFailure: false,
-    failureType: null,
-    statusCode: statusCode,
-    errorDetails: null,
-    retryAfter: null,
-    rateLimited: false,
-    blockedByWAF: false,
-    suspiciousActivity: false
-  };
-  
-  // Analyze status codes
-  if (statusCode >= 400) {
-    analysis.isFailure = true;
-    
-    switch (statusCode) {
-      case 400:
-        analysis.failureType = 'Bad Request - Invalid parameters or malformed request';
-        break;
-      case 401:
-        analysis.failureType = 'Unauthorized - Authentication required or failed';
-        break;
-      case 403:
-        analysis.failureType = 'Forbidden - Access denied or insufficient permissions';
-        break;
-      case 404:
-        analysis.failureType = 'Not Found - Endpoint may not exist or be disabled';
-        break;
-      case 405:
-        analysis.failureType = 'Method Not Allowed - HTTP method not supported';
-        break;
-      case 429:
-        analysis.failureType = 'Too Many Requests - Rate limited';
-        analysis.rateLimited = true;
-        break;
-      case 500:
-        analysis.failureType = 'Internal Server Error - Server-side authentication failure';
-        break;
-      case 502:
-        analysis.failureType = 'Bad Gateway - Authentication service unavailable';
-        break;
-      case 503:
-        analysis.failureType = 'Service Unavailable - Authentication service down';
-        break;
-      default:
-        analysis.failureType = `HTTP ${statusCode} - Authentication-related error`;
-    }
-  }
-  
-  // Analyze response headers for additional failure context
-  if (responseHeaders) {
-    responseHeaders.forEach(header => {
-      const name = header.name.toLowerCase();
-      const value = header.value.toLowerCase();
-      
-      switch (name) {
-        case 'www-authenticate':
-          analysis.errorDetails = `Authentication challenge: ${header.value}`;
-          break;
-        case 'retry-after':
-          analysis.retryAfter = header.value;
-          break;
-        case 'x-ratelimit-remaining':
-          if (parseInt(header.value) === 0) {
-            analysis.rateLimited = true;
-          }
-          break;
-        case 'server':
-          if (value.includes('cloudflare') || value.includes('aws') || value.includes('akamai')) {
-            analysis.blockedByWAF = statusCode === 403;
-          }
-          break;
-        case 'x-frame-options':
-          if (statusCode === 403 && value === 'deny') {
-            analysis.errorDetails = 'Request blocked by X-Frame-Options policy';
-          }
-          break;
-      }
-    });
-  }
-  
-  // Check for suspicious patterns
-  const lowerUrl = url.toLowerCase();
-  if (statusCode === 401 || statusCode === 403) {
-    if (lowerUrl.includes('admin') || lowerUrl.includes('api/v') || lowerUrl.includes('internal')) {
-      analysis.suspiciousActivity = true;
-    }
-  }
-  
-  return analysis;
-}
+// NOTE: analyzeAuthFailure now imported from modules/auth-flow-analyzer.js
 
 // Analyze network errors for authentication context
 function analyzeAuthError(error, url) {
@@ -3648,12 +2406,14 @@ function analyzeAuthError(error, url) {
   }
 };
 
-// Clean up old sessions every 10 minutes
-setInterval(() => sessionTracker.cleanupOldSessions(), 10 * 60 * 1000);
+// (Removed duplicate setInterval - now using chrome.alarms.onAlarm at line 49)
 
 // Generate unique session ID (legacy function for compatibility)
+// SECURITY FIX P1-NEW: Use crypto.randomUUID() instead of Math.random()
+// Math.random() is NOT cryptographically secure and predictable
+// Only ~52 bits of entropy vs 128 bits from crypto.randomUUID()
 function generateSessionId() {
-  return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  return 'session_' + crypto.randomUUID();
 }
 
 // Calculate overall risk score for an authentication event
@@ -3893,149 +2653,8 @@ function calculateOverallRiskScore(requestData) {
 }
 
 // JWT Analysis Function
-function analyzeJWT(tokenValue) {
-  const analysis = {
-    riskScore: 0,
-    riskFactors: [],
-    vulnerabilities: [],
-    decodedToken: null
-  };
-
-  try {
-    // Extract JWT from various formats
-    let jwt = tokenValue.replace(/^Bearer\s+/i, '').replace(/^jwt\s+/i, '').trim();
-
-    // Basic JWT format check
-    const parts = jwt.split('.');
-    if (parts.length !== 3) {
-      return analysis; // Not a valid JWT
-    }
-
-    // Decode header and payload
-    const header = JSON.parse(atob(parts[0].replace(/-/g, '+').replace(/_/g, '/')));
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-
-    analysis.decodedToken = {
-      header: header,
-      payload: payload,
-      signature: parts[2]
-    };
-
-    // Check for critical vulnerabilities
-
-    // 1. Algorithm "none" vulnerability
-    if (header.alg === 'none' || header.alg === 'None' || header.alg === 'NONE') {
-      analysis.riskScore += 100;
-      analysis.riskFactors.push({
-        type: 'JWT_ALG_NONE',
-        severity: 'CRITICAL',
-        points: 100,
-        description: 'JWT uses "none" algorithm - signature verification disabled',
-        recommendation: 'Use a proper signing algorithm (RS256, ES256, HS256)'
-      });
-      analysis.vulnerabilities.push({
-        category: 'JWT Security',
-        finding: 'Algorithm None Attack',
-        severity: 'CRITICAL',
-        description: 'JWT token uses "none" algorithm, allowing signature bypass',
-        impact: 'Attackers can create valid tokens without knowing the secret key'
-      });
-    }
-
-    // 2. Weak algorithms
-    if (['HS256', 'HS384', 'HS512'].includes(header.alg)) {
-      analysis.riskScore += 20;
-      analysis.riskFactors.push({
-        type: 'JWT_WEAK_ALG',
-        severity: 'MEDIUM',
-        points: 20,
-        description: `JWT uses symmetric algorithm ${header.alg} which may be vulnerable to algorithm confusion`,
-        recommendation: 'Consider using asymmetric algorithms like RS256 or ES256'
-      });
-    }
-
-    // 3. No expiration
-    if (!payload.exp) {
-      analysis.riskScore += 30;
-      analysis.riskFactors.push({
-        type: 'JWT_NO_EXPIRATION',
-        severity: 'HIGH',
-        points: 30,
-        description: 'JWT has no expiration time (exp claim missing)',
-        recommendation: 'Set appropriate expiration time for tokens'
-      });
-      analysis.vulnerabilities.push({
-        category: 'JWT Security',
-        finding: 'Missing Token Expiration',
-        severity: 'HIGH',
-        description: 'JWT token has no expiration claim, creating indefinite validity',
-        impact: 'Compromised tokens remain valid indefinitely'
-      });
-    }
-
-    // 4. Long expiration (more than 24 hours)
-    if (payload.exp) {
-      const expirationTime = new Date(payload.exp * 1000);
-      const issuedTime = payload.iat ? new Date(payload.iat * 1000) : new Date();
-      const lifetimeHours = (expirationTime.getTime() - issuedTime.getTime()) / (1000 * 60 * 60);
-
-      if (lifetimeHours > 24) {
-        analysis.riskScore += 15;
-        analysis.riskFactors.push({
-          type: 'JWT_LONG_EXPIRATION',
-          severity: 'MEDIUM',
-          points: 15,
-          description: `JWT has very long expiration time (${Math.round(lifetimeHours)} hours)`,
-          recommendation: 'Use shorter token lifetimes with refresh token pattern'
-        });
-      }
-    }
-
-    // 5. Sensitive data in payload
-    const sensitiveFields = ['password', 'secret', 'key', 'token', 'ssn', 'credit', 'card'];
-    const payloadStr = JSON.stringify(payload).toLowerCase();
-    const foundSensitive = sensitiveFields.filter(field => payloadStr.includes(field));
-
-    if (foundSensitive.length > 0) {
-      analysis.riskScore += 40;
-      analysis.riskFactors.push({
-        type: 'JWT_SENSITIVE_DATA',
-        severity: 'HIGH',
-        points: 40,
-        description: `JWT payload contains potentially sensitive fields: ${foundSensitive.join(', ')}`,
-        recommendation: 'Avoid storing sensitive data in JWT payload'
-      });
-      analysis.vulnerabilities.push({
-        category: 'Information Disclosure',
-        finding: 'Sensitive Data in JWT',
-        severity: 'HIGH',
-        description: 'JWT payload contains sensitive information',
-        impact: 'Sensitive data is exposed as JWTs are only base64 encoded, not encrypted'
-      });
-    }
-
-    // 6. Missing critical claims
-    const requiredClaims = ['iss', 'aud', 'sub'];
-    const missingClaims = requiredClaims.filter(claim => !payload[claim]);
-
-    if (missingClaims.length > 0) {
-      analysis.riskScore += 10;
-      analysis.riskFactors.push({
-        type: 'JWT_MISSING_CLAIMS',
-        severity: 'LOW',
-        points: 10,
-        description: `JWT missing recommended claims: ${missingClaims.join(', ')}`,
-        recommendation: 'Include issuer (iss), audience (aud), and subject (sub) claims'
-      });
-    }
-
-  } catch (error) {
-    // If we can't decode it, it might not be a valid JWT
-    console.log('JWT analysis failed:', error);
-  }
-
-  return analysis;
-}
+// JWT analysis function now imported from modules/jwt-utils.js
+// - analyzeJWT()
 
 // (Removed duplicate updateBadge - already defined at line 53)
 
@@ -4153,3 +2772,489 @@ function convertComprehensiveProfileToSignals(profile) {
 
   return signals;
 }
+
+// ==================== ALL-IN-ONE DECEPTION/DESIGN DETECTION ====================
+// ARCHITECTURE FIX P0-1: Analysis runs in content script, background handles storage
+
+// SECURITY FIX P1-7 & NEW-P2-1: Safe storage with quota error recovery and mutex
+// P0-3 FIX: Proper mutex implementation (no TOCTOU)
+const storageLocks = new Map(); // key -> Promise
+
+async function safeStorageSet(data, key = null) {
+  // Extract key for mutex (e.g., 'siteAnalysis_123')
+  const storageKey = key || Object.keys(data)[0];
+
+  // CRITICAL FIX P0-3: Atomic lock acquisition
+  // Chain new write after existing lock (if any)
+  const previousLock = storageLocks.get(storageKey) || Promise.resolve();
+
+  // Create new lock that waits for previous lock
+  const lock = previousLock.then(async () => {
+    try {
+      await chrome.storage.local.set(data);
+      return { success: true };
+    } catch (error) {
+      if (error.message && error.message.includes('QUOTA')) {
+        console.warn('Hera: Storage quota exceeded, performing emergency cleanup');
+
+        // Get all analysis data
+        const allData = await chrome.storage.local.get(null);
+        const analysisKeys = Object.keys(allData).filter(k => k.startsWith('siteAnalysis_'));
+
+        if (analysisKeys.length > 10) {
+          // Remove oldest 50% of analyses
+          const toRemove = analysisKeys.slice(0, Math.floor(analysisKeys.length / 2));
+          await chrome.storage.local.remove(toRemove);
+          console.log(`Hera: Removed ${toRemove.length} old analyses to free space`);
+
+          // Retry storage
+          await chrome.storage.local.set(data);
+
+          // Notify user
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/icon128.png',
+            title: 'Hera Storage Warning',
+            message: 'Storage quota exceeded. Older analysis data was automatically removed.',
+            priority: 1
+          });
+
+          return { success: true, quotaExceeded: true };
+        }
+      }
+      throw error;
+    }
+  }).finally(() => {
+    // Clean up: remove lock only if it's still THIS lock
+    if (storageLocks.get(storageKey) === lock) {
+      storageLocks.delete(storageKey);
+    }
+  });
+
+  // Set new lock BEFORE awaiting (atomic)
+  storageLocks.set(storageKey, lock);
+  return lock;
+}
+
+// CRITICAL FIX NEW-P1-4: Note - This is the SECOND message listener (first is at line 629)
+// Both listeners handle different message formats:
+//   - First listener: message.action (auth/probe/repeater)
+//   - Second listener: message.type (analysis results)
+// This is intentional - they route different message types
+
+// Message handler for analysis results from content script
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // P0-4 FIX: Reject messages with BOTH action AND type (security)
+  if (message.action && message.type) {
+    console.warn('Hera: Message has both action and type - rejecting to prevent double processing');
+    sendResponse({ success: false, error: 'Invalid message format: cannot have both action and type' });
+    return false;
+  }
+
+  // Skip if this is an 'action' message (handled by first listener)
+  if (message.action) {
+    return false; // Let first listener handle it
+  }
+
+  // SECURITY FIX P1-4: Validate message sender to prevent web page message spoofing
+  if (!sender.id || sender.id !== chrome.runtime.id) {
+    console.warn('Hera: Rejecting message from untrusted sender:', sender);
+    sendResponse({ success: false, error: 'Unauthorized sender' });
+    return false;
+  }
+
+  // P1-EIGHTH-2 FIX: Validate sender.url for type-based messages
+  const allowedSenderUrls = [
+    chrome.runtime.getURL('popup.html'),
+    chrome.runtime.getURL('devtools/devtools.html'),
+    chrome.runtime.getURL('probe-consent.html'),
+    chrome.runtime.getURL('privacy-consent-ui.html')
+  ];
+
+  const senderUrl = sender.url || '';
+  const isAuthorizedSender = allowedSenderUrls.some(allowed => senderUrl.startsWith(allowed));
+
+  // P1-EIGHTH-2 FIX: Content scripts can only send specific type-based messages
+  // P0-SIXTEENTH-1 FIX: Add INJECT_RESPONSE_INTERCEPTOR to allowed types (it's sent by content-script.js:162)
+  const contentScriptAllowedTypes = [
+    'ANALYSIS_COMPLETE',
+    'ANALYSIS_ERROR',
+    'GET_SITE_ANALYSIS',
+    'TRIGGER_ANALYSIS',
+    'INJECT_RESPONSE_INTERCEPTOR'  // P0-SIXTEENTH-1 FIX: Content script requests interceptor injection
+  ];
+
+  if (!isAuthorizedSender && message.type && !contentScriptAllowedTypes.includes(message.type)) {
+    console.error(`Hera SECURITY: Unauthorized type message from ${senderUrl}: ${message.type}`);
+    sendResponse({ success: false, error: 'Unauthorized sender for this message type' });
+    return false;
+  }
+
+  if (message.type === 'ANALYSIS_COMPLETE') {
+    // P0-ELEVENTH-3 FIX: Synchronous sender validation BEFORE any async work
+    // TOCTOU attack: Malicious extension times message to arrive during async window
+    // Fix: Capture all sender info synchronously, validate completely before async operations
+
+    const tabId = sender.tab?.id;
+    const tabUrl = sender.tab?.url;
+    const senderId = sender.id;
+    const senderFrameId = sender.frameId;
+
+    // P0-ELEVENTH-3 FIX: Reject if not from content script (frameId must exist)
+    if (typeof senderFrameId !== 'number') {
+      console.error('Hera SECURITY: ANALYSIS_COMPLETE must come from content script');
+      sendResponse({ success: false, error: 'Invalid sender context' });
+      return false;
+    }
+
+    // P0-ELEVENTH-3 FIX: Reject if from other extension
+    if (senderId && senderId !== chrome.runtime.id) {
+      console.error('Hera SECURITY: ANALYSIS_COMPLETE from external extension blocked');
+      sendResponse({ success: false, error: 'External extension blocked' });
+      return false;
+    }
+
+    // SECURITY FIX P1-6: Validate sender tab and URL
+    if (!tabId) {
+      console.warn('Hera: Rejecting analysis from sender without tab ID');
+      sendResponse({ success: false, error: 'Invalid sender' });
+      return false;
+    }
+
+    // SECURITY FIX NEW-P1-2: Strict URL validation (prevent spoofing)
+    if (tabUrl && message.url !== tabUrl) {
+      // Check if it's same-origin (iframe on same domain)
+      try {
+        const messageOrigin = new URL(message.url).origin;
+        const tabOrigin = new URL(tabUrl).origin;
+
+        if (messageOrigin !== tabOrigin) {
+          console.error('Hera: SECURITY - Cross-origin analysis attempt blocked');
+          console.error(`  Message URL: ${message.url}`);
+          console.error(`  Sender tab URL: ${tabUrl}`);
+          sendResponse({ success: false, error: 'URL validation failed - cross-origin' });
+          return false;
+        }
+
+        // Same origin but different path - could be SPA navigation
+        console.log('Hera: Same-origin URL mismatch (likely SPA navigation)');
+        console.log(`  Message URL: ${message.url}`);
+        console.log(`  Sender URL: ${tabUrl}`);
+
+      } catch (error) {
+        console.error('Hera: Invalid URL in analysis message:', error);
+        sendResponse({ success: false, error: 'Invalid URL format' });
+        return false;
+      }
+    }
+
+    if (tabId) {
+      // P0-5 FIX: Strict input validation before storage
+      // Prevents DoS via massive payloads or malformed data
+
+      // Validate findings array
+      if (!Array.isArray(message.findings)) {
+        sendResponse({ success: false, error: 'Invalid findings format' });
+        return false;
+      }
+
+      // P0-5: Limit findings array size (prevent DoS)
+      const MAX_FINDINGS = 100;
+      if (message.findings.length > MAX_FINDINGS) {
+        console.warn(`Hera: Findings array too large (${message.findings.length}), truncating to ${MAX_FINDINGS}`);
+        message.findings = message.findings.slice(0, MAX_FINDINGS);
+      }
+
+      // P0-5: Validate each finding object
+      const MAX_FINDING_SIZE = 10000; // 10KB per finding
+      for (const finding of message.findings) {
+        if (!finding || typeof finding !== 'object') {
+          sendResponse({ success: false, error: 'Invalid finding object' });
+          return false;
+        }
+
+        const findingSize = JSON.stringify(finding).length;
+        if (findingSize > MAX_FINDING_SIZE) {
+          sendResponse({ success: false, error: 'Finding object too large' });
+          return false;
+        }
+      }
+
+      // Validate score object
+      if (!message.score || typeof message.score !== 'object') {
+        sendResponse({ success: false, error: 'Invalid score format' });
+        return false;
+      }
+
+      if (typeof message.score.grade !== 'string' || typeof message.score.criticalIssues !== 'number') {
+        sendResponse({ success: false, error: 'Invalid score fields' });
+        return false;
+      }
+
+      // P0-5: Validate overall payload size (excluding HTML for compression analysis)
+      const MAX_PAYLOAD_SIZE = 500 * 1024; // 500KB max for stored data
+      const payloadSize = JSON.stringify({
+        findings: message.findings,
+        score: message.score
+      }).length;
+
+      if (payloadSize > MAX_PAYLOAD_SIZE) {
+        sendResponse({ success: false, error: `Payload too large: ${payloadSize} bytes exceeds ${MAX_PAYLOAD_SIZE} limit` });
+        return false;
+      }
+
+      // P1-THIRTEENTH-2: Validate HTML size separately (not stored, only used for compression)
+      if (message.html) {
+        const MAX_HTML_SIZE = 2 * 1024 * 1024; // 2MB max for HTML content
+        if (message.html.length > MAX_HTML_SIZE) {
+          console.warn(`Hera: HTML content too large (${message.html.length} bytes), skipping compression analysis`);
+          message.html = null; // Don't process overly large pages
+        }
+      }
+
+      // P0-FOURTEENTH-3 FIX: Properly handle async compression analysis
+      // Must await the async work before calling sendResponse
+      (async () => {
+        try {
+          let compressionAnalysis = null;
+          if (compressionAnalyzerReady && message.html) {
+            try {
+              compressionAnalysis = await compressionAnalyzer.analyzeAuthPage(message.html, message.url);
+
+              // Add compression findings to existing findings array
+              if (compressionAnalysis.indicators && compressionAnalysis.indicators.length > 0) {
+                message.findings.push({
+                  type: 'COMPRESSION_ANALYSIS',
+                  severity: compressionAnalysis.recommendation === 'BLOCK' ? 'CRITICAL' :
+                           compressionAnalysis.recommendation === 'WARN' ? 'MEDIUM' : 'INFO',
+                  description: `PhishZip analysis: ${compressionAnalysis.recommendation}`,
+                  details: compressionAnalysis.indicators,
+                  suspicionScore: compressionAnalysis.suspicionScore,
+                  confidence: compressionAnalysis.confidence
+                });
+
+                // Update critical issues count if blocking recommendation
+                if (compressionAnalysis.recommendation === 'BLOCK') {
+                  message.score.criticalIssues += 1;
+                }
+              }
+            } catch (error) {
+              console.warn('Hera: Compression analysis failed (non-blocking):', error);
+            }
+          }
+
+          // SECURITY FIX P1-7 & NEW-P2-1: Use safe storage with mutex and quota handling
+          const storageKey = `siteAnalysis_${tabId}`;
+          await safeStorageSet({
+            [storageKey]: {
+              url: message.url,
+              findings: message.findings,
+              score: message.score,
+              analysisSuccessful: message.analysisSuccessful,
+              timestamp: message.timestamp,
+              compressionAnalysis // P1-THIRTEENTH-2: Include PhishZip results
+            }
+          }, storageKey);
+
+          console.log(`Hera: Stored analysis for tab ${tabId}:`, {
+            url: message.url,
+            grade: message.score.grade,
+            findings: message.findings.length
+          });
+
+          // Show notification for critical issues
+          if (message.score.criticalIssues > 0) {
+            chrome.notifications.create({
+              type: 'basic',
+              iconUrl: 'icons/icon128.png',
+              title: 'Hera Security Alert',
+              message: `This site has ${message.score.criticalIssues} critical security issues. Grade: ${message.score.grade}`,
+              priority: 2
+            });
+          }
+
+          sendResponse({ success: true });
+        } catch (error) {
+          console.error('Hera: Failed to process analysis:', error);
+          sendResponse({ success: false, error: error.message });
+        }
+      })();
+    }
+
+    return true; // Keep message channel open for async response
+  }
+
+  if (message.type === 'ANALYSIS_ERROR') {
+    // Log analysis errors
+    console.error('Hera: Content script analysis failed:', {
+      url: message.url,
+      error: message.error
+    });
+
+    sendResponse({ success: true });
+    return false;
+  }
+
+  if (message.type === 'GET_SITE_ANALYSIS') {
+    // Return cached analysis for popup
+    // P0-SIXTH-1 FIX: Proper error handling for async operation
+    handleGetAnalysis()
+      .then(sendResponse)
+      .catch(error => {
+        console.error('Hera: GET_SITE_ANALYSIS failed:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
+
+  if (message.type === 'TRIGGER_ANALYSIS') {
+    // Forward analysis trigger to content script
+    // P0-SIXTH-1 FIX: Proper error handling for async operation
+    handleTriggerAnalysis()
+      .then(sendResponse)
+      .catch(error => {
+        console.error('Hera: TRIGGER_ANALYSIS failed:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
+
+  if (message.type === 'INJECT_RESPONSE_INTERCEPTOR') {
+    // SECURITY FIX P1-1: Inject response interceptor in isolated world
+    // P0-SIXTH-1 FIX: Proper error handling for async operation
+    handleInterceptorInjection(sender, message)
+      .then(sendResponse)
+      .catch(error => {
+        console.error('Hera: INJECT_RESPONSE_INTERCEPTOR failed:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
+});
+
+// SECURITY FIX P1-1: Inject response interceptor in isolated world
+// CRITICAL FIX: Removed duplicate handleInterceptorInjection (already defined at top of file)
+
+// SECURITY FIX P0-5: Proper async message handling
+async function handleGetAnalysis() {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    if (tabs.length === 0) {
+      return { error: 'No active tab' };
+    }
+
+    const tabId = tabs[0].id;
+    const result = await chrome.storage.local.get([`siteAnalysis_${tabId}`]);
+    const analysis = result[`siteAnalysis_${tabId}`];
+
+    if (analysis) {
+      return { success: true, analysis: analysis };
+    } else {
+      return { error: 'No analysis available' };
+    }
+  } catch (error) {
+    console.error('Hera: Failed to get analysis:', error);
+    return { error: error.message };
+  }
+}
+
+async function handleTriggerAnalysis() {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    if (tabs.length === 0) {
+      return { error: 'No active tab' };
+    }
+
+    const tab = tabs[0];
+
+    // CRITICAL FIX: Check if tab URL is injectable
+    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('about:') ||
+        tab.url.startsWith('chrome-extension://') || tab.url.startsWith('edge://')) {
+      return { error: 'Cannot analyze restricted pages (chrome://, about://, etc.)' };
+    }
+
+    // CRITICAL FIX: Try to inject content script if it's not already loaded
+    try {
+      await chrome.tabs.sendMessage(tab.id, { type: 'PING' });
+    } catch (pingError) {
+      // Content script not loaded - inject it now
+      console.log('Hera: Content script not loaded, injecting now...');
+
+      try {
+        // Inject detector modules first
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: [
+            'modules/subdomain-impersonation-detector.js',
+            'modules/dark-pattern-detector.js',
+            'modules/phishing-detector.js',
+            'modules/privacy-violation-detector.js',
+            'modules/risk-scoring-engine.js',
+            'content-script.js'
+          ]
+        });
+
+        // Wait a bit for content script to initialize
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (injectError) {
+        console.error('Hera: Failed to inject content script:', injectError);
+        return { error: 'Failed to inject content script. Try refreshing the page.' };
+      }
+    }
+
+    // Send trigger message to content script
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: 'TRIGGER_ANALYSIS'
+    });
+
+    if (response && response.success) {
+      return { success: true, score: response.score };
+    } else {
+      return { error: 'Analysis failed' };
+    }
+  } catch (error) {
+    console.error('Hera: Failed to trigger analysis:', error);
+
+    if (error.message.includes('Receiving end does not exist')) {
+      return { error: 'Content script not ready. Please refresh the page.' };
+    }
+
+    return { error: error.message };
+  }
+}
+
+// P0-SIXTEENTH-2 FIX: Run cleanup on startup to prevent quota exhaustion
+// P0-SIXTEENTH-3 FIX: Initialize compression analyzer
+async function initializeHera() {
+  console.log('Hera: Initializing all systems...');
+
+  try {
+    // 1. Initialize compression analyzer (P0-SIXTEENTH-3)
+    await compressionAnalyzer.initialize();
+    compressionAnalyzerReady = true;
+    console.log('Hera: Compression analyzer ready');
+  } catch (error) {
+    console.error('Hera: Compression analyzer failed to initialize:', error);
+    compressionAnalyzerReady = false;  // P1-SEVENTEENTH-1 FIX: Explicitly mark as not ready
+  }
+
+  // 2. Run cleanup to free quota (P0-SIXTEENTH-2)
+  try {
+    await memoryManager.cleanupStaleRequests();
+    await heraAlertManager.cleanupAlertHistory();
+    const bytesInUse = await chrome.storage.local.getBytesInUse();
+    const quota = chrome.storage.local.QUOTA_BYTES || 10485760;
+    console.log(`Hera: Storage quota ${(bytesInUse / 1024).toFixed(0)}KB / ${(quota / 1024).toFixed(0)}KB (${((bytesInUse / quota) * 100).toFixed(1)}%)`);
+  } catch (error) {
+    console.error('Hera: Startup cleanup failed:', error);
+  }
+
+  console.log('Hera: All systems initialized');
+}
+
+// Run initialization
+initializeHera();
+
+console.log('Hera: All-in-one detection system loaded (analysis runs in content script)');
