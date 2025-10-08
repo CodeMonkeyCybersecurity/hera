@@ -96,6 +96,9 @@ export class SessionRenderer {
       // Sort by timestamp (newest first)
       this.requests.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
+      // Dispatch event to update global requests
+      window.dispatchEvent(new CustomEvent('requestsUpdated', { detail: this.requests }));
+
       this.renderRequests();
       this.renderFindings();
     });
