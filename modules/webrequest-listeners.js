@@ -1,0 +1,423 @@
+/**
+ * WebRequest Listeners - Chrome webRequest API event handlers
+ * Captures HTTP requests/responses for auth flow analysis
+ */
+
+import { analyzeRequestHeaders, analyzeResponseHeaders } from './header-utils.js';
+
+export class WebRequestListeners {
+  constructor(
+    heraReady,
+    authRequests,
+    heraAuthDetector,
+    heraPortAuthAnalyzer,
+    evidenceCollector,
+    storageManager,
+    sessionTracker,
+    decodeRequestBody
+  ) {
+    this.heraReady = heraReady;
+    this.authRequests = authRequests;
+    this.heraAuthDetector = heraAuthDetector;
+    this.heraPortAuthAnalyzer = heraPortAuthAnalyzer;
+    this.evidenceCollector = evidenceCollector;
+    this.storageManager = storageManager;
+    this.sessionTracker = sessionTracker;
+    this.decodeRequestBody = decodeRequestBody;
+  }
+
+  /**
+   * Initialize all webRequest listeners
+   */
+  async initialize() {
+    const hasPermission = await chrome.permissions.contains({
+      permissions: ['webRequest'],
+      origins: ['https://*/*', 'http://localhost/*']
+    });
+
+    if (!hasPermission) {
+      console.warn('Hera: webRequest permission not granted - request monitoring disabled');
+      console.warn('Hera: Grant permission in extension settings to enable full functionality');
+      return false;
+    }
+
+    console.log('Hera: webRequest permissions granted, initializing listeners...');
+
+    // Register all listeners
+    this.registerBeforeRequest();
+    this.registerBeforeSendHeaders();
+    this.registerHeadersReceived();
+    this.registerBeforeRedirect();
+    this.registerCompleted();
+    this.registerErrorOccurred();
+
+    return true;
+  }
+
+  /**
+   * 1. onBeforeRequest - Capture request initiation
+   */
+  registerBeforeRequest() {
+    chrome.webRequest.onBeforeRequest.addListener(
+      (details) => {
+        // CRITICAL FIX P0: Wait for initialization before processing
+        if (!this.heraReady()) {
+          console.warn('Hera: Not ready, skipping request:', details.url);
+          return;
+        }
+
+        const isAuthRelated = this.heraAuthDetector.isAuthRequest(details.url, {});
+        if (isAuthRelated) {
+          // SECURITY FIX P2: Generate nonce for request/response matching
+          const requestNonce = crypto.randomUUID();
+
+          this.authRequests.set(details.requestId, {
+            id: details.requestId,
+            url: details.url,
+            method: details.method,
+            type: details.type,
+            tabId: details.tabId,
+            timestamp: new Date().toISOString(),
+            requestBody: this.decodeRequestBody(details.requestBody),
+            nonce: requestNonce,
+            requestHeaders: [],
+            responseHeaders: [],
+            statusCode: null,
+            responseBody: null,
+            metadata: {},
+          });
+        }
+      },
+      { urls: ["<all_urls>"] },
+      ["requestBody"]
+    );
+  }
+
+  /**
+   * 2. onBeforeSendHeaders - Capture request headers and analyze
+   */
+  registerBeforeSendHeaders() {
+    chrome.webRequest.onBeforeSendHeaders.addListener(
+      (details) => {
+        if (!this.heraReady()) return;
+        
+        const requestData = this.authRequests.get(details.requestId);
+        if (requestData) {
+          requestData.requestHeaders = details.requestHeaders;
+          
+          // Perform analysis now that we have headers
+          const authAnalysis = this.heraAuthDetector.analyze(
+            details.url,
+            details.method,
+            details.requestHeaders,
+            requestData.requestBody
+          );
+          
+          requestData.authType = authAnalysis.protocol;
+          
+          // Ensure metadata exists
+          if (!requestData.metadata) {
+            requestData.metadata = {};
+          }
+          
+          requestData.metadata.authAnalysis = authAnalysis;
+          requestData.metadata.authAnalysis.riskCategory = 
+            this.heraAuthDetector.getRiskCategory(authAnalysis.riskScore);
+
+          // Update port analysis with headers
+          requestData.metadata.authTypeAnalysis = this.heraPortAuthAnalyzer.detectAuthType({
+            url: details.url,
+            method: details.method,
+            requestHeaders: details.requestHeaders,
+            requestBody: requestData.requestBody
+          });
+
+          // Check for default credentials
+          requestData.metadata.credentialAnalysis = this.heraPortAuthAnalyzer.checkDefaultCredentials({
+            url: details.url,
+            requestHeaders: details.requestHeaders,
+            requestBody: requestData.requestBody
+          });
+        }
+      },
+      { urls: ["<all_urls>"] },
+      ["requestHeaders"]
+    );
+  }
+
+  /**
+   * 3. onHeadersReceived - Capture response headers
+   */
+  registerHeadersReceived() {
+    chrome.webRequest.onHeadersReceived.addListener(
+      (details) => {
+        if (!this.heraReady()) return;
+        
+        // Capture response evidence using EvidenceCollector
+        const responseEvidence = this.evidenceCollector.captureResponse(
+          details.requestId,
+          details.responseHeaders,
+          null, // Response body will be captured separately
+          details.statusCode,
+          { url: details.url, method: details.method }
+        );
+
+        const requestData = this.authRequests.get(details.requestId);
+        if (requestData) {
+          requestData.responseHeaders = details.responseHeaders;
+          requestData.statusCode = details.statusCode;
+
+          // Add evidence-based analysis to metadata
+          if (!requestData.metadata) requestData.metadata = {};
+          requestData.metadata.evidencePackage = responseEvidence;
+
+          // Analyze response headers for security info
+          if (details.responseHeaders) {
+            const responseAnalysis = analyzeResponseHeaders(details.responseHeaders);
+            requestData.metadata.responseAnalysis = responseAnalysis;
+          }
+
+          this.authRequests.set(details.requestId, requestData);
+        }
+      },
+      { urls: ["<all_urls>"] },
+      ["responseHeaders", "extraHeaders"]
+    );
+  }
+
+  /**
+   * 4. onBeforeRedirect - Track redirect chains
+   */
+  registerBeforeRedirect() {
+    chrome.webRequest.onBeforeRedirect.addListener(
+      (details) => {
+        if (!this.heraReady()) return;
+        
+        const requestData = this.authRequests.get(details.requestId);
+        if (requestData) {
+          // Ensure metadata structure exists
+          if (!requestData.metadata) {
+            requestData.metadata = {};
+          }
+          if (!requestData.metadata.networkChain) {
+            requestData.metadata.networkChain = {
+              primaryIP: null,
+              redirectChain: [],
+              dnsChain: null,
+              certificateChain: null
+            };
+          }
+          if (!requestData.metadata.networkChain.redirectChain) {
+            requestData.metadata.networkChain.redirectChain = [];
+          }
+
+          // Track redirect chain with IPs
+          requestData.metadata.networkChain.redirectChain.push({
+            fromUrl: details.url,
+            toUrl: details.redirectUrl,
+            ip: details.ip,
+            statusCode: details.statusCode,
+            timestamp: Date.now()
+          });
+          
+          this.authRequests.set(details.requestId, requestData);
+        }
+      },
+      { urls: ["<all_urls>"] }
+    );
+  }
+
+  /**
+   * 5. onCompleted - Finalize request with session tracking
+   */
+  registerCompleted() {
+    chrome.webRequest.onCompleted.addListener(
+      async (details) => {
+        if (!this.heraReady()) return;
+        
+        const requestData = this.authRequests.get(details.requestId);
+        if (requestData) {
+          requestData.statusCode = details.statusCode;
+          requestData.responseHeaders = details.responseHeaders;
+          
+          // Complete timing data
+          if (!requestData.metadata) {
+            requestData.metadata = {};
+          }
+          if (!requestData.metadata.timing) {
+            requestData.metadata.timing = {
+              startTime: Date.now(),
+              endTime: null
+            };
+          }
+          requestData.metadata.timing.endTime = Date.now();
+          requestData.metadata.timing.duration = 
+            requestData.metadata.timing.endTime - requestData.metadata.timing.startTime;
+          
+          // Analyze response headers
+          const responseAnalysis = analyzeResponseHeaders(details.responseHeaders);
+          requestData.metadata.responseAnalysis = responseAnalysis;
+          
+          // Get tab information for browser context
+          if (details.tabId >= 0) {
+            chrome.tabs.get(details.tabId, (tab) => {
+              if (tab) {
+                requestData.metadata.browserContext = {
+                  tabUrl: tab.url,
+                  tabTitle: tab.title,
+                  isIncognito: tab.incognito,
+                  userAgent: null
+                };
+                this.authRequests.set(details.requestId, requestData);
+              }
+            });
+          }
+          
+          this.authRequests.set(details.requestId, requestData);
+          
+          // P0-SEVENTEENTH-2: Backend scanning disabled (CSP violations)
+          const hostname = new URL(details.url).hostname;
+          requestData.metadata.backendSecurity = {
+            domain: hostname,
+            exposed: [],
+            riskScore: 0,
+            shouldBlockDataEntry: false,
+            scanDisabled: true,
+            reason: 'CSP restrictions prevent background script from scanning arbitrary domains'
+          };
+          
+          // Get or create session for this domain with context
+          const requestContext = {
+            tabId: details.tabId,
+            initiator: details.initiator,
+            timestamp: Date.now(),
+            authHeaders: details.requestHeaders?.filter(h => 
+              h.name.toLowerCase().includes('auth') || 
+              h.name.toLowerCase() === 'authorization'
+            )
+          };
+          
+          // Determine service for this hostname
+          const service = this.sessionTracker.identifyService(hostname);
+          const sessionInfo = this.sessionTracker.getOrCreateSession(hostname, service, requestContext);
+          
+          // Add session information to request data
+          requestData.sessionInfo = {
+            sessionId: sessionInfo.id,
+            service: sessionInfo.service,
+            domain: sessionInfo.primaryDomain,
+            eventNumber: sessionInfo.eventCount,
+            ecosystem: sessionInfo.ecosystem,
+            correlationFactors: sessionInfo.correlationFactors
+          };
+          
+          // Store in persistent storage
+          await this.storageManager.storeAuthEvent({
+            ...requestData,
+            sessionId: sessionInfo.id,
+            service: sessionInfo.service,
+            riskScore: this.calculateOverallRiskScore(requestData)
+          });
+          
+          await this.storageManager.updateBadge();
+        }
+      },
+      { urls: ["<all_urls>"] }
+    );
+  }
+
+  /**
+   * 6. onErrorOccurred - Handle network errors
+   */
+  registerErrorOccurred() {
+    chrome.webRequest.onErrorOccurred.addListener(
+      (details) => {
+        if (!this.heraReady()) return;
+        
+        const requestData = this.authRequests.get(details.requestId);
+        if (requestData) {
+          requestData.error = details.error;
+          
+          // Ensure metadata structure exists
+          if (!requestData.metadata) {
+            requestData.metadata = {};
+          }
+          if (!requestData.metadata.timing) {
+            requestData.metadata.timing = {
+              startTime: Date.now(),
+              endTime: null
+            };
+          }
+          requestData.metadata.timing.endTime = Date.now();
+          requestData.metadata.timing.duration = 
+            requestData.metadata.timing.endTime - requestData.metadata.timing.startTime;
+          
+          // Analyze the error for authentication context
+          const errorAnalysis = this.analyzeAuthError(details.error, requestData.url);
+          requestData.metadata.errorAnalysis = errorAnalysis;
+          
+          this.authRequests.set(details.requestId, requestData);
+          this.storageManager.updateBadge();
+        }
+      },
+      { urls: ["<all_urls>"] }
+    );
+  }
+
+  /**
+   * Analyze network errors for authentication context
+   */
+  analyzeAuthError(error, url) {
+    const analysis = {
+      errorType: error,
+      isNetworkFailure: true,
+      possibleCauses: [],
+      securityImplications: []
+    };
+    
+    switch (error) {
+      case 'net::ERR_CONNECTION_REFUSED':
+        analysis.possibleCauses.push('Authentication server is down or unreachable');
+        analysis.securityImplications.push('Service availability issue');
+        break;
+      case 'net::ERR_CONNECTION_TIMED_OUT':
+        analysis.possibleCauses.push('Authentication server timeout');
+        analysis.possibleCauses.push('Network connectivity issues');
+        break;
+      case 'net::ERR_NAME_NOT_RESOLVED':
+        analysis.possibleCauses.push('DNS resolution failed for authentication domain');
+        analysis.securityImplications.push('Possible DNS hijacking or domain issues');
+        break;
+      case 'net::ERR_CERT_AUTHORITY_INVALID':
+      case 'net::ERR_CERT_COMMON_NAME_INVALID':
+      case 'net::ERR_CERT_DATE_INVALID':
+        analysis.possibleCauses.push('SSL/TLS certificate validation failed');
+        analysis.securityImplications.push('CRITICAL: Potential man-in-the-middle attack');
+        break;
+      case 'net::ERR_SSL_PROTOCOL_ERROR':
+        analysis.possibleCauses.push('SSL/TLS protocol error');
+        analysis.securityImplications.push('Possible SSL stripping or protocol downgrade attack');
+        break;
+      case 'net::ERR_BLOCKED_BY_CLIENT':
+        analysis.possibleCauses.push('Request blocked by ad blocker or security extension');
+        break;
+      case 'net::ERR_NETWORK_ACCESS_DENIED':
+        analysis.possibleCauses.push('Network access denied by firewall or proxy');
+        break;
+      default:
+        analysis.possibleCauses.push(`Network error: ${error}`);
+    }
+    
+    return analysis;
+  }
+
+  /**
+   * Calculate overall risk score (placeholder - will be moved to risk-calculator module)
+   */
+  calculateOverallRiskScore(requestData) {
+    // Simplified version - full implementation in risk-calculator.js
+    const metadata = requestData.metadata || {};
+    const authAnalysis = metadata.authAnalysis || {};
+    return authAnalysis.riskScore || 0;
+  }
+}

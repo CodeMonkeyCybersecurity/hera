@@ -42,6 +42,12 @@ import { DebuggerManager } from './modules/debugger-manager.js';
 import { EventHandlers } from './modules/event-handlers.js';
 import { AlarmHandlers } from './modules/alarm-handlers.js';
 
+// ==================== REQUEST/RESPONSE HANDLING ====================
+import { WebRequestListeners } from './modules/webrequest-listeners.js';
+import { DebuggerEvents } from './modules/debugger-events.js';
+import { MessageRouter } from './modules/message-router.js';
+import { decodeRequestBody, generateSessionId } from './modules/request-decoder.js';
+
 // ==================== UTILITY MODULES ====================
 import { SecurityValidation } from './modules/security-validation.js';
 
@@ -80,6 +86,19 @@ const alarmHandlers = new AlarmHandlers(
   sessionTracker,
   storageManager
 );
+
+// Storage helper (backward compatibility)
+const heraStore = {
+  async storeAuthEvent(eventData) {
+    return storageManager.storeAuthEvent(eventData);
+  },
+  async storeSession(sessionData) {
+    return storageManager.storeSession(sessionData);
+  }
+};
+
+// Badge update helper
+const updateBadge = () => storageManager.updateBadge();
 
 // Proxy wrappers for backward compatibility
 const authRequestsWrapperCache = new Map();
@@ -190,11 +209,50 @@ eventHandlers.registerListeners(initializeWebRequestListeners);
 alarmHandlers.registerListener(initializationPromise);
 alarmHandlers.initializeAlarms();
 
-// ==================== PLACEHOLDER FOR WEBREQUEST LISTENERS ====================
-// TODO: Extract webRequest listeners to separate module
+// ==================== REQUEST/RESPONSE HANDLING INITIALIZATION ====================
+
+// Initialize webRequest listeners
+const webRequestListeners = new WebRequestListeners(
+  () => heraReady,
+  authRequests,
+  heraAuthDetector,
+  heraPortAuthAnalyzer,
+  evidenceCollector,
+  storageManager,
+  sessionTracker,
+  decodeRequestBody
+);
+
+// Initialize debugger events
+const debuggerEvents = new DebuggerEvents(
+  () => heraReady,
+  authRequests,
+  debugTargets,
+  heraAuthDetector,
+  heraSecretScanner,
+  storageManager,
+  updateBadge
+);
+
+// Initialize message router
+const messageRouter = new MessageRouter(
+  authRequests,
+  debugTargets,
+  heraAuthDetector,
+  storageManager,
+  memoryManager,
+  updateBadge,
+  null, // handleInterceptorInjection - will be added in Phase 3
+  generateSessionId,
+  heraStore
+);
+
+// Register all handlers
+debuggerEvents.register();
+messageRouter.register();
+
 async function initializeWebRequestListeners() {
-  // This will be modularized in the next step
-  console.log('Hera: webRequest listeners initialization (to be modularized)');
+  return await webRequestListeners.initialize();
 }
 
-console.log('Hera: Modular background script loaded');
+console.log('Hera: Modular background script loaded (Phase 2 complete)');
