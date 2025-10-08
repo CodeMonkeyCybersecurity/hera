@@ -34,7 +34,7 @@
  * - Review 13: Fixed PhishZip P0 issues (pako loading, baseline validation, async handler)
  * - Review 14: Fixed 8 issues (3 P0 XSS, 2 P1 validation, 2 P2 DoS, 1 P3 dead code)
  * - Review 15: Fixed 3 issues (1 P0 false positive, 1 P1 UX, 1 P2 modal)
- * - Review 16 (Oct 6): Fixed 10 issues from production error logs
+ * - Review 16: Fixed 10 issues from production error logs
  *   ✅ P0-SIXTEENTH-1: Message authorization bug (INJECT_RESPONSE_INTERCEPTOR, getBackendScan unauthorized)
  *   ✅ P0-SIXTEENTH-2: Storage quota exhaustion (circuit breaker, pre-write quota checks, startup cleanup)
  *   ✅ P0-SIXTEENTH-3: pako.js initialization race (initializeHera() startup coordinator)
@@ -43,6 +43,11 @@
  *   ✅ P2-SIXTEENTH-3: Broken encryption imports removed (secure-storage.js deprecated)
  *   ✅ P3-SIXTEENTH-1: Dead code in manifest.json (empty web_accessible_resources removed)
  *   ✅ P3-SIXTEENTH-2: Documented debounce timing rationale (100ms vs 1000ms tradeoffs)
+ * - Review 17 (Oct 9): Fixed 4 critical production errors
+ *   ✅ P0-SEVENTEENTH-1: getBackendScan authorization fixed (was in wrong listener whitelist)
+ *   ✅ P0-SEVENTEENTH-2: Backend scanning disabled (CSP blocks fetch to arbitrary domains)
+ *   ✅ P0-SEVENTEENTH-3: Circuit breaker memory leak (rejects writes + clears cache when open)
+ *   ✅ P1-SEVENTEENTH-1: pako.js init error swallowed (now explicitly sets ready=false)
  */
 
 // Core analysis engines
@@ -1651,24 +1656,19 @@ if (!heraReady) return;     const requestData = authRequests.get(details.request
       
       authRequests.set(details.requestId, requestData);
       
-      // Only scan backends for suspicious or unknown domains, not legitimate services
+      // P0-SEVENTEENTH-2 FIX: Backend scanning disabled (CSP violations)
+      // The extension's CSP blocks fetch() to arbitrary domains
+      // Backend scanning would need to run in content script context (no CSP)
+      // For now, skip backend scanning entirely to prevent console spam
       const hostname = new URL(details.url).hostname;
-      const shouldScanBackend = !isKnownLegitimateService(hostname);
-      
-      if (shouldScanBackend) {
-        console.log(`Scanning backend for suspicious domain: ${hostname}`);
-        const backendScan = await scanForExposedBackends(hostname);
-        requestData.metadata.backendSecurity = backendScan;
-      } else {
-        console.log(`Skipping backend scan for legitimate service: ${hostname}`);
-        requestData.metadata.backendSecurity = {
-          domain: hostname,
-          exposed: [],
-          riskScore: 0,
-          shouldBlockDataEntry: false,
-          legitimateService: true
-        };
-      }
+      requestData.metadata.backendSecurity = {
+        domain: hostname,
+        exposed: [],
+        riskScore: 0,
+        shouldBlockDataEntry: false,
+        scanDisabled: true,
+        reason: 'CSP restrictions prevent background script from scanning arbitrary domains'
+      };
       
       // Get or create session for this domain with context
       const requestContext = {
@@ -3237,6 +3237,7 @@ async function initializeHera() {
     console.log('Hera: Compression analyzer ready');
   } catch (error) {
     console.error('Hera: Compression analyzer failed to initialize:', error);
+    compressionAnalyzerReady = false;  // P1-SEVENTEENTH-1 FIX: Explicitly mark as not ready
   }
 
   // 2. Run cleanup to free quota (P0-SIXTEENTH-2)

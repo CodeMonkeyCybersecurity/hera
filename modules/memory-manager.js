@@ -113,7 +113,18 @@ export class MemoryManager {
       if (error.message?.includes('QUOTA_BYTES')) {
         console.error('Hera: Storage quota exceeded, forcing aggressive cleanup');
         this._syncFailureCount++;
-        await this._performQuotaCleanup();
+        
+        // P0-SEVENTEENTH-3 FIX: Emergency cleanup - clear in-memory cache too
+        if (this._syncFailureCount >= 3) {
+          console.error('Hera: Circuit breaker OPEN - clearing in-memory cache to prevent OOM');
+          const cacheSize = this._authRequestsCache.size;
+          this._authRequestsCache.clear();
+          this._debugTargetsCache.clear();
+          this._originRequestCount.clear();
+          console.error(`Hera: Cleared ${cacheSize} in-memory requests (circuit breaker emergency)`);
+        } else {
+          await this._performQuotaCleanup();
+        }
         // P0-SIXTEENTH-2 FIX: Do NOT retry immediately - causes infinite loop
         // Next syncWrite() will attempt again
       } else {
@@ -219,6 +230,12 @@ export class MemoryManager {
 
   async addAuthRequest(requestId, requestData) {
     await this.initPromise;
+
+    // P0-SEVENTEENTH-3 FIX: Reject writes if circuit breaker is open
+    if (this._syncFailureCount >= 3) {
+      console.error('Hera: Circuit breaker OPEN - rejecting new auth request to prevent memory leak');
+      return false;
+    }
 
     // P0-TENTH-3 FIX: Extract origin
     let origin;
