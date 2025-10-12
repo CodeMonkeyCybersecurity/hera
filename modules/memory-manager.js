@@ -89,50 +89,147 @@ export class MemoryManager {
     try {
       console.log('Hera: Emergency storage cleanup starting...');
 
-      // Get all keys
+      // Get current quota usage
+      const initialBytes = await chrome.storage.local.getBytesInUse();
+      const quota = chrome.storage.local.QUOTA_BYTES || 10485760;
+      console.log(`Hera: Initial storage: ${(initialBytes / 1024 / 1024).toFixed(2)} MB (${(initialBytes / quota * 100).toFixed(1)}%)`);
+
+      // Get all keys and their data
       const allKeys = await chrome.storage.local.get(null);
       const keys = Object.keys(allKeys);
 
       console.log(`Hera: Found ${keys.length} storage keys`);
 
+      // Calculate size of each key for reporting
+      const keySizes = [];
+      for (const key of keys) {
+        const size = JSON.stringify(allKeys[key]).length;
+        keySizes.push({ key, size, sizeMB: (size / 1024 / 1024).toFixed(2) });
+      }
+      keySizes.sort((a, b) => b.size - a.size);
+
+      // Log top 5 largest keys
+      console.log('Hera: Top 5 largest storage keys:');
+      keySizes.slice(0, 5).forEach((item, i) => {
+        console.log(`  ${i + 1}. ${item.key}: ${item.sizeMB} MB`);
+      });
+
       // Remove large/old data
       const toRemove = [];
+      let savedBytes = 0;
 
-      // Remove old heraSessions (keep only most recent 10)
-      if (allKeys.heraSessions && Array.isArray(allKeys.heraSessions)) {
-        const sessions = allKeys.heraSessions
-          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-          .slice(0, 10); // Keep only 10 most recent
+      // 1. CLEAR EVIDENCE DATA (usually the largest - can be multiple MB)
+      if (allKeys.heraEvidence) {
+        const evidenceSize = JSON.stringify(allKeys.heraEvidence).length;
+        const evidence = allKeys.heraEvidence;
+        const responseCount = evidence.responseCache ? Object.keys(evidence.responseCache).length : 0;
+        const timelineCount = evidence.timeline ? evidence.timeline.length : 0;
 
-        await chrome.storage.local.set({ heraSessions: sessions });
-        console.log(`Hera: Reduced heraSessions from ${allKeys.heraSessions.length} to ${sessions.length}`);
+        console.log(`Hera: Found heraEvidence: ${responseCount} responses, ${timelineCount} timeline events (${(evidenceSize / 1024 / 1024).toFixed(2)} MB)`);
+
+        // Only keep last 10 responses and 50 timeline events
+        const cleanedEvidence = {
+          responseCache: {},
+          flowCorrelation: {},
+          proofOfConcepts: [],
+          timeline: evidence.timeline ? evidence.timeline.slice(-50) : [],
+          activeFlows: {}
+        };
+
+        // Keep only most recent 10 responses
+        if (evidence.responseCache) {
+          const responses = Object.entries(evidence.responseCache)
+            .sort((a, b) => (b[1].timestamp || 0) - (a[1].timestamp || 0))
+            .slice(0, 10);
+          cleanedEvidence.responseCache = Object.fromEntries(responses);
+        }
+
+        await chrome.storage.local.set({ heraEvidence: cleanedEvidence });
+        savedBytes += evidenceSize - JSON.stringify(cleanedEvidence).length;
+        console.log(`Hera: Cleaned heraEvidence - kept 10 responses, 50 timeline events (saved ${(savedBytes / 1024 / 1024).toFixed(2)} MB)`);
       }
 
-      // Remove old evidence data
+      // 2. Remove old heraSessions (keep only most recent 5)
+      if (allKeys.heraSessions && Array.isArray(allKeys.heraSessions)) {
+        const originalSize = JSON.stringify(allKeys.heraSessions).length;
+        const sessions = allKeys.heraSessions
+          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+          .slice(0, 5); // Keep only 5 most recent (down from 10)
+
+        await chrome.storage.local.set({ heraSessions: sessions });
+        const newSize = JSON.stringify(sessions).length;
+        savedBytes += originalSize - newSize;
+        console.log(`Hera: Reduced heraSessions from ${allKeys.heraSessions.length} to ${sessions.length} (saved ${((originalSize - newSize) / 1024).toFixed(0)} KB)`);
+      }
+
+      // 3. Remove old evidence_* prefixed keys (if any exist)
       for (const key of keys) {
         if (key.startsWith('evidence_') || key.startsWith('heraEvidence_')) {
+          const size = JSON.stringify(allKeys[key]).length;
           toRemove.push(key);
+          savedBytes += size;
         }
       }
 
-      // Remove old analysis data (keep only most recent)
-      const analysiKeys = keys.filter(k => k.startsWith('heraSiteAnalysis'));
+      // 4. Remove old analysis data (keep only most recent)
+      const analysisKeys = keys.filter(k => k.startsWith('heraSiteAnalysis'));
       if (analysisKeys.length > 1) {
-        toRemove.push(...analysisKeys.slice(1)); // Keep only first (most recent)
+        for (let i = 1; i < analysisKeys.length; i++) {
+          const size = JSON.stringify(allKeys[analysisKeys[i]]).length;
+          toRemove.push(analysisKeys[i]);
+          savedBytes += size;
+        }
       }
 
+      // 5. Clear authRequests and debugTargets from memory manager (will be rebuilt)
+      if (allKeys.authRequests) {
+        const size = JSON.stringify(allKeys.authRequests).length;
+        toRemove.push('authRequests');
+        savedBytes += size;
+        console.log(`Hera: Clearing authRequests (${(size / 1024).toFixed(0)} KB)`);
+      }
+
+      if (allKeys.debugTargets) {
+        const size = JSON.stringify(allKeys.debugTargets).length;
+        toRemove.push('debugTargets');
+        savedBytes += size;
+      }
+
+      // 6. Remove any other large keys (>1MB)
+      for (const { key, size } of keySizes) {
+        if (size > 1048576 && !toRemove.includes(key) && key !== 'heraEvidence' && key !== 'heraSessions') {
+          console.log(`Hera: Removing large key: ${key} (${(size / 1024 / 1024).toFixed(2)} MB)`);
+          toRemove.push(key);
+          savedBytes += size;
+        }
+      }
+
+      // Execute removals
       if (toRemove.length > 0) {
         await chrome.storage.local.remove(toRemove);
-        console.log(`Hera: Emergency cleanup removed ${toRemove.length} storage keys`);
+        console.log(`Hera: Removed ${toRemove.length} storage keys`);
       }
 
       // Check final quota
       const finalBytes = await chrome.storage.local.getBytesInUse();
-      const quota = chrome.storage.local.QUOTA_BYTES || 10485760;
-      console.log(`Hera: After emergency cleanup: ${(finalBytes / quota * 100).toFixed(1)}%`);
+      const savedMB = (savedBytes / 1024 / 1024).toFixed(2);
+      const finalMB = (finalBytes / 1024 / 1024).toFixed(2);
+      const finalPercent = (finalBytes / quota * 100).toFixed(1);
+
+      console.log(`Hera: Emergency cleanup complete:`);
+      console.log(`  - Removed: ${toRemove.length} keys`);
+      console.log(`  - Saved: ${savedMB} MB`);
+      console.log(`  - Final storage: ${finalMB} MB (${finalPercent}%)`);
+
+      // If still over 80%, log warning
+      if (finalBytes / quota > 0.8) {
+        console.warn('Hera: Storage still over 80% after emergency cleanup!');
+        console.warn('Hera: Consider migrating to IndexedDB for unlimited storage');
+      }
 
     } catch (error) {
       console.error('Hera: Emergency cleanup failed:', error);
+      console.error('Stack trace:', error.stack);
     }
   }
 

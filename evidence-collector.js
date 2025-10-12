@@ -80,17 +80,28 @@ class EvidenceCollector {
       // P0-SIXTEENTH-2 FIX: Check quota before writing
       const bytesInUse = await chrome.storage.local.getBytesInUse();
       const quota = chrome.storage.local.QUOTA_BYTES || 10485760;
+      const usagePercent = (bytesInUse / quota * 100).toFixed(1);
+
       if (bytesInUse / quota > 0.90) {
-        console.warn('Hera: Evidence sync skipped - quota >90%, cleaning up first');
-        await this._performCleanup();
+        console.warn(`Hera: Evidence sync - quota at ${usagePercent}%, cleaning up in-memory cache first`);
+
+        // Clean up in-memory data WITHOUT recursive sync call
+        this._performCleanup();
+
         // Check again after cleanup
         const bytesAfter = await chrome.storage.local.getBytesInUse();
+        const afterPercent = (bytesAfter / quota * 100).toFixed(1);
+
         if (bytesAfter / quota > 0.95) {
-          console.error('Hera: Evidence sync aborted - quota still >95% after cleanup');
+          console.error(`Hera: Evidence sync aborted - quota still at ${afterPercent}% after cleanup`);
+          console.error('Hera: Run emergency cleanup in memory-manager or clear storage manually');
           return;
         }
+
+        console.log(`Hera: Evidence cleanup complete, quota now at ${afterPercent}%`);
       }
 
+      // Build evidence object with already-cleaned in-memory data
       const evidence = {
         responseCache: Object.fromEntries(this._responseCache.entries()),
         flowCorrelation: Object.fromEntries(this._flowCorrelation.entries()),
@@ -99,34 +110,78 @@ class EvidenceCollector {
         activeFlows: Object.fromEntries(this._activeFlows.entries())
       };
 
+      // Calculate size before storing
+      const evidenceSize = JSON.stringify(evidence).length;
+      const evidenceMB = (evidenceSize / 1024 / 1024).toFixed(2);
+
+      // Final check: if evidence itself is >8 MB, it's too big to store
+      if (evidenceSize > 8388608) { // 8 MB
+        console.error(`Hera: Evidence object is ${evidenceMB} MB - too large to store!`);
+        console.error('Hera: Performing aggressive cleanup...');
+
+        // Aggressively reduce cache size
+        this.MAX_CACHE_SIZE = Math.min(10, this.MAX_CACHE_SIZE);
+        this.MAX_TIMELINE = Math.min(50, this.MAX_TIMELINE);
+        this._performCleanup();
+
+        console.log(`Hera: Reduced MAX_CACHE_SIZE to ${this.MAX_CACHE_SIZE}, MAX_TIMELINE to ${this.MAX_TIMELINE}`);
+        return; // Don't write this sync, wait for next sync with smaller data
+      }
+
       // CRITICAL FIX P0: Use chrome.storage.local (survives browser restart)
       // SECURITY FIX P2-NEW: Store schema version
       await chrome.storage.local.set({
         heraEvidence: evidence,
         heraEvidenceSchemaVersion: this.SCHEMA_VERSION
       });
+
+      console.log(`Hera: Evidence synced (${this._responseCache.size} responses, ${this._timeline.length} events, ${evidenceMB} MB)`);
+
     } catch (error) {
       if (error.message?.includes('QUOTA')) {
-        console.error('Hera: Failed to sync evidence: Error: Resource::kQuotaBytes quota exceeded');
-        await this._performCleanup();
+        console.error('Hera: Evidence sync failed - QUOTA_BYTES exceeded');
+        console.error('Hera: Performing aggressive cleanup...');
+
+        // Reduce limits and clean up
+        this.MAX_CACHE_SIZE = Math.min(5, this.MAX_CACHE_SIZE); // Reduce to 5
+        this.MAX_TIMELINE = Math.min(25, this.MAX_TIMELINE); // Reduce to 25
+        this._performCleanup();
+
+        console.log(`Hera: Reduced MAX_CACHE_SIZE to ${this.MAX_CACHE_SIZE}, MAX_TIMELINE to ${this.MAX_TIMELINE}`);
+        // Don't recurse - wait for next sync
       } else {
         console.error('Hera: Failed to sync evidence:', error);
       }
     }
   }
 
-  async _performCleanup() {
+  _performCleanup() {
+    // IMPORTANT: This is now synchronous and does NOT call _syncToStorage()
+    // to prevent infinite recursion
+
+    let cleaned = false;
+
     if (this._responseCache.size > this.MAX_CACHE_SIZE) {
+      const beforeSize = this._responseCache.size;
       const sorted = Array.from(this._responseCache.entries())
-        .sort((a, b) => b[1].timestamp - a[1].timestamp);
+        .sort((a, b) => (b[1].timestamp || 0) - (a[1].timestamp || 0));
       this._responseCache = new Map(sorted.slice(0, this.MAX_CACHE_SIZE));
+      console.log(`Hera: Cleaned response cache: ${beforeSize} → ${this._responseCache.size}`);
+      cleaned = true;
     }
 
     if (this._timeline.length > this.MAX_TIMELINE) {
+      const beforeSize = this._timeline.length;
       this._timeline = this._timeline.slice(-this.MAX_TIMELINE);
+      console.log(`Hera: Cleaned timeline: ${beforeSize} → ${this._timeline.length} events`);
+      cleaned = true;
     }
 
-    await this._syncToStorage();
+    if (!cleaned) {
+      console.log('Hera: Evidence cleanup - no action needed (within limits)');
+    }
+
+    // DO NOT call _syncToStorage() here - that creates infinite recursion!
   }
 
   _debouncedSync() {
