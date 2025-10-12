@@ -1,0 +1,34 @@
+{
+  "name": "hera-chrome-extension",
+  "version": "1.0.0",
+  "description": "Hera - Security testing extension for authentication flows",
+  "type": "module",
+  "scripts": {
+    "lint": "eslint . --ext .js",
+    "lint:fix": "eslint . --ext .js --fix",
+    "lint:modules": "eslint modules --ext .js",
+    "lint:background": "eslint background.js modules/background --ext .js",
+    "lint:content": "eslint content-script.js modules/content --ext .js",
+    "lint:popup": "eslint popup.js modules/ui --ext .js",
+    "lint:watch": "nodemon --watch . --ext js --exec 'npm run lint'"
+  },
+  "keywords": [
+    "chrome-extension",
+    "security",
+    "oauth",
+    "authentication",
+    "security-testing"
+  ],
+  "author": "Code Monkey Cybersecurity",
+  "license": "UNLICENSED",
+  "private": true,
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "eslint-plugin-chrome-extension": "^1.0.1",
+    "eslint-plugin-webextensions": "^0.7.0",
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

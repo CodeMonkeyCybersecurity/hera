@@ -1,0 +1,100 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true,
+    "webextensions": true
+  },
+  "extends": [
+    "eslint:recommended"
+  ],
+  "plugins": [
+    "webextensions"
+  ],
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "module"
+  },
+  "globals": {
+    "chrome": "readonly"
+  },
+  "rules": {
+    // Error Prevention
+    "no-unused-vars": ["warn", {
+      "argsIgnorePattern": "^_",
+      "varsIgnorePattern": "^_"
+    }],
+    "no-undef": "error",
+    "no-console": "off",
+    "no-debugger": "warn",
+    "no-constant-condition": ["error", { "checkLoops": false }],
+
+    // Chrome Extension Best Practices
+    "webextensions/no-browser-action-set-icon-without-path": "error",
+    "webextensions/no-browser-action-set-popup-without-popup": "error",
+
+    // Async/Await Best Practices
+    "require-await": "warn",
+    "no-async-promise-executor": "error",
+    "no-await-in-loop": "warn",
+
+    // Code Quality
+    "no-var": "error",
+    "prefer-const": "warn",
+    "prefer-arrow-callback": "warn",
+    "eqeqeq": ["error", "always", { "null": "ignore" }],
+    "curly": ["error", "all"],
+    "no-eval": "error",
+    "no-implied-eval": "error",
+
+    // Security
+    "no-new-func": "error",
+    "no-script-url": "error",
+
+    // Style (warnings only)
+    "semi": ["warn", "always"],
+    "quotes": ["warn", "single", { "avoidEscape": true, "allowTemplateLiterals": true }],
+    "indent": ["warn", 2, { "SwitchCase": 1 }],
+    "comma-dangle": ["warn", "never"],
+    "arrow-spacing": "warn",
+    "space-before-function-paren": ["warn", {
+      "anonymous": "always",
+      "named": "never",
+      "asyncArrow": "always"
+    }]
+  },
+  "overrides": [
+    {
+      "files": ["background.js", "modules/background/**/*.js"],
+      "rules": {
+        "no-restricted-globals": ["error", {
+          "name": "window",
+          "message": "Service workers don't have window. Use self instead."
+        }, {
+          "name": "document",
+          "message": "Service workers don't have document. Use chrome.scripting API."
+        }]
+      }
+    },
+    {
+      "files": ["content-script.js", "modules/content/**/*.js"],
+      "globals": {
+        "document": "readonly",
+        "window": "readonly"
+      }
+    },
+    {
+      "files": ["popup.js", "modules/ui/**/*.js"],
+      "globals": {
+        "document": "readonly",
+        "window": "readonly"
+      }
+    },
+    {
+      "files": ["**/test/**/*.js", "**/*.test.js", "**/*.spec.js"],
+      "env": {
+        "mocha": true,
+        "jest": true
+      }
+    }
+  ]
+}

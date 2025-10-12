@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+build/
+
+# Backup files
+*.backup
+*.backup.js
+*-backup.js
+*-monolithic-backup.js
+
+# Documentation
+docs/
+
+# Git
+.git/
+.github/
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+
+# Test files (if you want to lint them separately)
+# **/*.test.js
+# **/*.spec.js
+
+# Third-party libraries
+lib/
+libs/
+vendor/
+
+# Specific files to ignore
+hera-compression-analyzer.js
+pako.js
+
+# Debug scripts
+DEBUG-*.js
