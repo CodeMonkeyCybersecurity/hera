@@ -146,7 +146,13 @@ export class MessageRouter {
       
       case 'getRequests':
         return this.handleGetRequests(sendResponse);
-      
+
+      case 'getPortAnalysis':
+        return this.handleGetPortAnalysis(sendResponse);
+
+      case 'getExtensionsAnalysis':
+        return this.handleGetExtensionsAnalysis(sendResponse);
+
       case 'getBackendScan':
         return this.handleGetBackendScan(message, sendResponse);
       
@@ -408,6 +414,267 @@ export class MessageRouter {
   }
 
   /**
+   * Handle getPortAnalysis action
+   */
+  handleGetPortAnalysis(sendResponse) {
+    try {
+      const requestsArray = Array.from(this.authRequests.values());
+
+      // Analyze port distribution
+      const ports = {};
+      const authTypes = {};
+      const risks = [];
+
+      requestsArray.forEach(request => {
+        try {
+          const url = new URL(request.url);
+          const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+
+          // Count ports
+          ports[port] = (ports[port] || 0) + 1;
+
+          // Count auth types
+          const authType = request.authType || 'Unknown';
+          authTypes[authType] = (authTypes[authType] || 0) + 1;
+
+          // Check for port-related risks
+          if (url.protocol === 'http:' && (port === '80' || port === '8080')) {
+            risks.push({
+              severity: 'critical',
+              title: 'Unencrypted Authentication',
+              description: `Authentication over HTTP on port ${port} (${url.hostname})`
+            });
+          }
+
+          // Non-standard HTTPS port
+          if (url.protocol === 'https:' && port !== '443' && port !== '80') {
+            risks.push({
+              severity: 'low',
+              title: 'Non-standard HTTPS Port',
+              description: `HTTPS on non-standard port ${port} (${url.hostname})`
+            });
+          }
+        } catch (e) {
+          // Invalid URL, skip
+        }
+      });
+
+      sendResponse({
+        success: true,
+        data: {
+          ports,
+          authTypes,
+          risks: risks.slice(0, 10) // Limit to 10 risks
+        }
+      });
+    } catch (error) {
+      console.error('Port analysis error:', error);
+      sendResponse({
+        success: false,
+        error: error.message
+      });
+    }
+
+    return false;
+  }
+
+  /**
+   * Handle getExtensionsAnalysis action
+   */
+  handleGetExtensionsAnalysis(sendResponse) {
+    // Chrome extensions can't easily query other extensions for security reasons
+    // This is a placeholder that would need user permission to access management API
+    try {
+      chrome.management.getAll((extensions) => {
+        if (chrome.runtime.lastError) {
+          sendResponse({
+            success: false,
+            error: chrome.runtime.lastError.message
+          });
+          return;
+        }
+
+        // Filter out this extension and analyze others
+        const analyzed = extensions
+          .filter(ext => ext.id !== chrome.runtime.id)
+          .map(ext => {
+            // Basic risk assessment
+            let riskLevel = 'low';
+            const issues = [];
+
+            // Check permissions
+            const dangerousPermissions = ['webRequest', 'webRequestBlocking', 'debugger', '<all_urls>'];
+            const hasDangerousPerms = ext.permissions.some(perm =>
+              dangerousPermissions.some(danger => perm.includes(danger))
+            );
+
+            if (hasDangerousPerms) {
+              riskLevel = 'medium';
+              issues.push('Has broad permissions that could intercept authentication data');
+            }
+
+            if (ext.permissions.includes('cookies') || ext.permissions.includes('webRequest')) {
+              issues.push('Can access cookies and network requests');
+            }
+
+            // Not from web store
+            if (ext.installType === 'development' || ext.installType === 'sideload') {
+              riskLevel = 'high';
+              issues.push('Sideloaded extension (not from Chrome Web Store)');
+            }
+
+            return {
+              id: ext.id,
+              name: ext.name,
+              version: ext.version,
+              enabled: ext.enabled,
+              permissions: ext.permissions || [],
+              installType: ext.installType,
+              riskLevel,
+              issues
+            };
+          });
+
+        sendResponse({
+          success: true,
+          data: {
+            extensions: analyzed
+          }
+        });
+      });
+
+      return true; // Async response
+    } catch (error) {
+      console.error('Extensions analysis error:', error);
+      sendResponse({
+        success: false,
+        error: 'Extension analysis requires management permission'
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Handle GET_SITE_ANALYSIS type message
+   * Returns the most recent analysis for the current tab's domain
+   */
+  handleGetSiteAnalysis(sendResponse) {
+    chrome.storage.local.get(['heraSiteAnalysis'], (result) => {
+      if (chrome.runtime.lastError) {
+        console.error('Error retrieving site analysis:', chrome.runtime.lastError);
+        sendResponse({ success: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+
+      const analysis = result.heraSiteAnalysis;
+      if (analysis && analysis.url) {
+        sendResponse({
+          success: true,
+          analysis: analysis
+        });
+      } else {
+        sendResponse({
+          success: false,
+          error: 'No analysis data available'
+        });
+      }
+    });
+
+    return true; // Async response
+  }
+
+  /**
+   * Handle TRIGGER_ANALYSIS type message
+   * Triggers analysis on the active tab's content script
+   */
+  async handleTriggerAnalysis(sendResponse) {
+    try {
+      // Get the active tab
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+
+      if (!tabs || tabs.length === 0) {
+        sendResponse({ success: false, error: 'No active tab found' });
+        return false;
+      }
+
+      const activeTab = tabs[0];
+
+      // Check if tab is valid for content script injection
+      if (!activeTab.url || activeTab.url.startsWith('chrome://') || activeTab.url.startsWith('chrome-extension://')) {
+        sendResponse({
+          success: false,
+          error: 'Cannot analyze Chrome internal pages'
+        });
+        return false;
+      }
+
+      console.log('Hera: Triggering analysis on tab:', activeTab.id, activeTab.url);
+
+      // Send message to content script to trigger analysis
+      chrome.tabs.sendMessage(activeTab.id, { type: 'TRIGGER_ANALYSIS' }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error('Error triggering analysis:', chrome.runtime.lastError);
+          sendResponse({
+            success: false,
+            error: 'Content script not ready. Try refreshing the page.'
+          });
+        } else if (response && response.success) {
+          sendResponse({
+            success: true,
+            score: response.score
+          });
+        } else {
+          sendResponse({
+            success: false,
+            error: response?.error || 'Analysis failed'
+          });
+        }
+      });
+
+      return true; // Async response
+    } catch (error) {
+      console.error('Trigger analysis error:', error);
+      sendResponse({ success: false, error: error.message });
+      return false;
+    }
+  }
+
+  /**
+   * Handle ANALYSIS_COMPLETE type message
+   * Stores analysis results from content script
+   */
+  handleAnalysisComplete(message, sendResponse) {
+    if (!message.url || !message.score) {
+      console.warn('ANALYSIS_COMPLETE missing required fields');
+      sendResponse({ success: false, error: 'Invalid analysis data' });
+      return false;
+    }
+
+    console.log('Hera: Analysis complete for:', message.url);
+
+    // Store the analysis results
+    const analysisData = {
+      url: message.url,
+      findings: message.findings || [],
+      score: message.score,
+      timestamp: message.timestamp || new Date().toISOString(),
+      analysisSuccessful: message.analysisSuccessful !== false
+    };
+
+    chrome.storage.local.set({ heraSiteAnalysis: analysisData }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Error storing analysis:', chrome.runtime.lastError);
+        sendResponse({ success: false, error: chrome.runtime.lastError.message });
+      } else {
+        console.log('Hera: Analysis results stored successfully');
+        sendResponse({ success: true });
+      }
+    });
+
+    return true; // Async response
+  }
+
+  /**
    * Handle type-based messages (analysis results)
    */
   handleTypeMessage(message, sender, sendResponse) {
@@ -444,9 +711,25 @@ export class MessageRouter {
     }
 
     // Route type-based messages
-    // (These would be handled by analysis modules - placeholder for now)
-    console.log('Hera: Type-based message routing (to be implemented in analysis modules)');
-    return false;
+    switch (message.type) {
+      case 'GET_SITE_ANALYSIS':
+        return this.handleGetSiteAnalysis(sendResponse);
+
+      case 'TRIGGER_ANALYSIS':
+        return this.handleTriggerAnalysis(sendResponse);
+
+      case 'ANALYSIS_COMPLETE':
+        return this.handleAnalysisComplete(message, sendResponse);
+
+      case 'ANALYSIS_ERROR':
+        console.error('Analysis error received:', message.error);
+        sendResponse({ success: false, error: message.error });
+        return false;
+
+      default:
+        console.log('Hera: Unhandled type-based message:', message.type);
+        return false;
+    }
   }
 
   /**

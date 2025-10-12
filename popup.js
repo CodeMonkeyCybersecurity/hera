@@ -27,6 +27,7 @@ import { SessionRenderer } from './modules/ui/session-renderer.js';
 import { RequestDetails } from './modules/ui/request-details.js';
 import { HeraDashboard } from './modules/ui/dashboard.js';
 import { RepeaterTool } from './modules/ui/repeater-tool.js';
+import { ViewNavigator } from './modules/ui/view-navigator.js';
 
 // Global state (shared between modules)
 let requests = [];
@@ -48,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const requestDetails = new RequestDetails();
   const dashboard = new HeraDashboard();
   const repeaterTool = new RepeaterTool();
+  const viewNavigator = new ViewNavigator();
 
   // Initialize each component
   settingsPanel.initialize();
@@ -55,6 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
   requestDetails.initialize();
   dashboard.initialize();
   repeaterTool.initialize();
+  viewNavigator.initialize(); // Must be after all panels are initialized
 
   // Wire up export buttons
   const exportBtn = document.getElementById('exportBtn');

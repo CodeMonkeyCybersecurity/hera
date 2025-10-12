@@ -76,6 +76,24 @@ class HeraAuthProtocolDetector {
   }
 
   /**
+   * Analyze authentication request (shorthand method)
+   * @param {string} url - Request URL
+   * @param {string} method - HTTP method
+   * @param {Array} headers - Request headers
+   * @param {string} body - Request body
+   * @returns {Object} Analysis results
+   */
+  analyze(url, method, headers, body) {
+    return this.analyzeRequest({
+      url,
+      method,
+      requestHeaders: headers,
+      headers: headers,
+      requestBody: body
+    });
+  }
+
+  /**
    * Enhance an issue with confidence levels and evidence
    */
   enhanceIssue(issue, request) {
