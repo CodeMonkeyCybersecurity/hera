@@ -45,6 +45,9 @@ export function shouldRunAnalysis() {
  * @returns {Promise<Object>} Analysis results with success status, findings, and score
  */
 export async function runComprehensiveAnalysis() {
+  console.log('AnalysisRunner: runComprehensiveAnalysis called');
+  console.log('AnalysisRunner: State check - running:', analysisRunning, 'completed:', analysisCompleted);
+
   // CRITICAL FIX P0-2: Prevent duplicate analysis runs
   if (analysisRunning) {
     console.log('Hera: Analysis already running, skipping duplicate call');
@@ -56,6 +59,7 @@ export async function runComprehensiveAnalysis() {
     return { success: false, error: 'Analysis already completed' };
   }
 
+  console.log('AnalysisRunner: Starting analysis - setting analysisRunning = true');
   analysisRunning = true;
 
   try {

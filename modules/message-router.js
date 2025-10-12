@@ -54,20 +54,35 @@ export class MessageRouter {
    * Register message listeners
    */
   register() {
+    console.log('MessageRouter: Registering message listeners...');
+
     // Action-based messages
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      console.log('MessageRouter: Message received (action handler):', {
+        action: message.action,
+        type: message.type,
+        senderUrl: sender.url
+      });
       return this.handleActionMessage(message, sender, sendResponse);
     });
 
     // Type-based messages (analysis results)
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      console.log('MessageRouter: Message received (type handler):', {
+        action: message.action,
+        type: message.type,
+        senderUrl: sender.url
+      });
       return this.handleTypeMessage(message, sender, sendResponse);
     });
 
     // DevTools port connections
     chrome.runtime.onConnect.addListener((port) => {
+      console.log('MessageRouter: Port connection:', port.name);
       this.handlePortConnection(port);
     });
+
+    console.log('MessageRouter: All listeners registered successfully');
   }
 
   /**
@@ -589,19 +604,26 @@ export class MessageRouter {
    * Automatically injects content script if not present
    */
   async handleTriggerAnalysis(sendResponse) {
+    console.log('MessageRouter: handleTriggerAnalysis called');
+
     try {
       // Get the active tab
+      console.log('MessageRouter: Querying active tab...');
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      console.log('MessageRouter: Found tabs:', tabs.length);
 
       if (!tabs || tabs.length === 0) {
+        console.error('MessageRouter: No active tab found');
         sendResponse({ success: false, error: 'No active tab found' });
         return false;
       }
 
       const activeTab = tabs[0];
+      console.log('MessageRouter: Active tab:', { id: activeTab.id, url: activeTab.url });
 
       // Check if tab is valid for content script injection
       if (!activeTab.url || activeTab.url.startsWith('chrome://') || activeTab.url.startsWith('chrome-extension://')) {
+        console.warn('MessageRouter: Cannot analyze Chrome internal page:', activeTab.url);
         sendResponse({
           success: false,
           error: 'Cannot analyze Chrome internal pages'
@@ -609,13 +631,16 @@ export class MessageRouter {
         return false;
       }
 
-      console.log('Hera: Triggering analysis on tab:', activeTab.id, activeTab.url);
+      console.log('MessageRouter: Triggering analysis on tab:', activeTab.id, activeTab.url);
 
       // First, try to ping the content script to see if it's already loaded
+      console.log('MessageRouter: Pinging content script...');
       chrome.tabs.sendMessage(activeTab.id, { type: 'PING' }, async (pingResponse) => {
+        console.log('MessageRouter: Ping response:', pingResponse, 'Error:', chrome.runtime.lastError);
+
         if (chrome.runtime.lastError || !pingResponse || !pingResponse.loaded) {
           // Content script not loaded - inject it dynamically
-          console.log('Hera: Content script not found, injecting dynamically...');
+          console.log('MessageRouter: Content script not found, injecting dynamically...');
 
           try {
             // Inject content script modules first
@@ -698,13 +723,24 @@ export class MessageRouter {
    * Stores analysis results from content script
    */
   handleAnalysisComplete(message, sendResponse) {
+    console.log('MessageRouter: handleAnalysisComplete called');
+    console.log('MessageRouter: Message data:', {
+      url: message.url,
+      hasScore: !!message.score,
+      findingsCount: message.findings?.length || 0
+    });
+
     if (!message.url || !message.score) {
-      console.warn('ANALYSIS_COMPLETE missing required fields');
+      console.error('MessageRouter: ANALYSIS_COMPLETE missing required fields:', {
+        hasUrl: !!message.url,
+        hasScore: !!message.score
+      });
       sendResponse({ success: false, error: 'Invalid analysis data' });
       return false;
     }
 
-    console.log('Hera: Analysis complete for:', message.url);
+    console.log('MessageRouter: Analysis complete for:', message.url);
+    console.log('MessageRouter: Score data:', message.score);
 
     // Store the analysis results
     const analysisData = {
@@ -715,12 +751,13 @@ export class MessageRouter {
       analysisSuccessful: message.analysisSuccessful !== false
     };
 
+    console.log('MessageRouter: Storing analysis data to chrome.storage.local...');
     chrome.storage.local.set({ heraSiteAnalysis: analysisData }, () => {
       if (chrome.runtime.lastError) {
-        console.error('Error storing analysis:', chrome.runtime.lastError);
+        console.error('MessageRouter: Error storing analysis:', chrome.runtime.lastError);
         sendResponse({ success: false, error: chrome.runtime.lastError.message });
       } else {
-        console.log('Hera: Analysis results stored successfully');
+        console.log('MessageRouter: Analysis results stored successfully');
         sendResponse({ success: true });
       }
     });
