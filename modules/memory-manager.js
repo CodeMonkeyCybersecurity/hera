@@ -23,8 +23,10 @@ export class MemoryManager {
     this.initPromise = this.initialize();
 
     // Quota monitoring
-    this.STORAGE_QUOTA_BYTES = 10 * 1024 * 1024; // 10MB limit for chrome.storage.local
+    this.STORAGE_QUOTA_BYTES = 10 * 1024 * 1024; // 10MB limit for chrome.storage.local (CANNOT BE INCREASED)
     this.QUOTA_WARNING_THRESHOLD = 0.8; // 80%
+    this.MAX_REQUESTS_TO_KEEP = 20; // Aggressively limit stored requests
+    this.MAX_REQUEST_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
   }
 
   // Initialize by loading from storage.session into in-memory cache
@@ -32,6 +34,19 @@ export class MemoryManager {
     if (this.initialized) return;
 
     try {
+      // Check quota BEFORE loading
+      const bytesInUse = await chrome.storage.local.getBytesInUse();
+      const quota = chrome.storage.local.QUOTA_BYTES || 10485760;
+      const usagePercent = bytesInUse / quota;
+
+      console.log(`Hera: Storage quota at ${(usagePercent * 100).toFixed(1)}% (${(bytesInUse / 1024 / 1024).toFixed(2)} MB / ${(quota / 1024 / 1024).toFixed(0)} MB)`);
+
+      // If over 70%, do aggressive cleanup BEFORE loading
+      if (usagePercent > 0.7) {
+        console.warn('Hera: Storage over 70% - performing emergency cleanup BEFORE initialization');
+        await this._emergencyStorageCleanup();
+      }
+
       // Load persisted data into cache
       // CRITICAL FIX P0-NEW: Use chrome.storage.local (survives browser restart)
       const data = await chrome.storage.local.get(['authRequests', 'debugTargets']);
@@ -52,12 +67,89 @@ export class MemoryManager {
         console.log(`Hera: Restored ${this._debugTargetsCache.size} debug targets from storage.session`);
       }
 
+      // Perform cleanup on loaded data if needed
+      if (this._authRequestsCache.size > this.MAX_REQUESTS_TO_KEEP) {
+        console.warn(`Hera: Loaded ${this._authRequestsCache.size} requests, cleaning up to ${this.MAX_REQUESTS_TO_KEEP}`);
+        await this._performQuotaCleanup();
+        // Save cleaned data immediately
+        await this._immediateSyncToStorage();
+      }
+
       this.initialized = true;
       console.log('Hera: Memory manager initialized with hybrid cache');
     } catch (error) {
       console.error('Hera: Failed to initialize memory manager:', error);
       // Continue with empty cache - not fatal
       this.initialized = true;
+    }
+  }
+
+  // Emergency cleanup - works directly on storage without loading into memory
+  async _emergencyStorageCleanup() {
+    try {
+      console.log('Hera: Emergency storage cleanup starting...');
+
+      // Get all keys
+      const allKeys = await chrome.storage.local.get(null);
+      const keys = Object.keys(allKeys);
+
+      console.log(`Hera: Found ${keys.length} storage keys`);
+
+      // Remove large/old data
+      const toRemove = [];
+
+      // Remove old heraSessions (keep only most recent 10)
+      if (allKeys.heraSessions && Array.isArray(allKeys.heraSessions)) {
+        const sessions = allKeys.heraSessions
+          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+          .slice(0, 10); // Keep only 10 most recent
+
+        await chrome.storage.local.set({ heraSessions: sessions });
+        console.log(`Hera: Reduced heraSessions from ${allKeys.heraSessions.length} to ${sessions.length}`);
+      }
+
+      // Remove old evidence data
+      for (const key of keys) {
+        if (key.startsWith('evidence_') || key.startsWith('heraEvidence_')) {
+          toRemove.push(key);
+        }
+      }
+
+      // Remove old analysis data (keep only most recent)
+      const analysiKeys = keys.filter(k => k.startsWith('heraSiteAnalysis'));
+      if (analysisKeys.length > 1) {
+        toRemove.push(...analysisKeys.slice(1)); // Keep only first (most recent)
+      }
+
+      if (toRemove.length > 0) {
+        await chrome.storage.local.remove(toRemove);
+        console.log(`Hera: Emergency cleanup removed ${toRemove.length} storage keys`);
+      }
+
+      // Check final quota
+      const finalBytes = await chrome.storage.local.getBytesInUse();
+      const quota = chrome.storage.local.QUOTA_BYTES || 10485760;
+      console.log(`Hera: After emergency cleanup: ${(finalBytes / quota * 100).toFixed(1)}%`);
+
+    } catch (error) {
+      console.error('Hera: Emergency cleanup failed:', error);
+    }
+  }
+
+  // Immediate sync without debounce (for emergency situations)
+  async _immediateSyncToStorage() {
+    try {
+      const authRequestsObj = Object.fromEntries(this._authRequestsCache.entries());
+      const debugTargetsObj = Object.fromEntries(this._debugTargetsCache.entries());
+
+      await chrome.storage.local.set({
+        authRequests: authRequestsObj,
+        debugTargets: debugTargetsObj
+      });
+
+      console.log('Hera: Immediate sync completed');
+    } catch (error) {
+      console.error('Hera: Immediate sync failed:', error);
     }
   }
 
@@ -167,25 +259,69 @@ export class MemoryManager {
   async _performQuotaCleanup() {
     console.log('Hera: Performing quota cleanup');
 
+    const now = Date.now();
+
     // Get all auth requests with timestamps
     const requestsWithTime = Array.from(this._authRequestsCache.entries())
       .filter(([id, data]) => data && data.timestamp)
       .sort((a, b) => new Date(b[1].timestamp) - new Date(a[1].timestamp));
 
-    // Keep only the most recent 50% if over quota
-    if (requestsWithTime.length > 10) {
-      const toKeep = Math.floor(requestsWithTime.length * 0.5);
-      const toRemove = requestsWithTime.slice(toKeep);
+    console.log(`Hera: Cleanup starting with ${requestsWithTime.length} requests`);
+
+    // AGGRESSIVE CLEANUP STRATEGY:
+    // 1. Remove requests older than 24 hours
+    const oldRequests = requestsWithTime.filter(([id, data]) => {
+      const age = now - new Date(data.timestamp).getTime();
+      return age > this.MAX_REQUEST_AGE_MS;
+    });
+
+    for (const [id] of oldRequests) {
+      this._authRequestsCache.delete(id);
+    }
+
+    if (oldRequests.length > 0) {
+      console.log(`Hera: Removed ${oldRequests.length} requests older than 24 hours`);
+    }
+
+    // 2. Keep only the most recent MAX_REQUESTS_TO_KEEP
+    const remaining = Array.from(this._authRequestsCache.entries())
+      .filter(([id, data]) => data && data.timestamp)
+      .sort((a, b) => new Date(b[1].timestamp) - new Date(a[1].timestamp));
+
+    if (remaining.length > this.MAX_REQUESTS_TO_KEEP) {
+      const toRemove = remaining.slice(this.MAX_REQUESTS_TO_KEEP);
 
       for (const [id] of toRemove) {
         this._authRequestsCache.delete(id);
       }
 
-      console.log(`Hera: Cleaned up ${toRemove.length} old auth requests (kept ${toKeep})`);
+      console.log(`Hera: Removed ${toRemove.length} excess requests (keeping only ${this.MAX_REQUESTS_TO_KEEP} most recent)`);
     }
 
-    // Force immediate sync
-    await this._syncToStorage();
+    // 3. Strip large fields from remaining requests to reduce size
+    for (const [id, data] of this._authRequestsCache.entries()) {
+      if (data) {
+        // Remove response bodies (largest field)
+        if (data.responseBody) {
+          delete data.responseBody;
+        }
+        if (data.requestBody && data.requestBody.length > 10000) {
+          data.requestBody = data.requestBody.substring(0, 10000) + '... [truncated]';
+        }
+        // Remove large intelligence data
+        if (data.metadata?.intelligence?.html) {
+          delete data.metadata.intelligence.html;
+        }
+        if (data.metadata?.backendSecurity?.pageHtml) {
+          delete data.metadata.backendSecurity.pageHtml;
+        }
+      }
+    }
+
+    console.log(`Hera: Cleanup complete - ${this._authRequestsCache.size} requests remaining`);
+
+    // DON'T force immediate sync here - let the caller decide
+    // await this._syncToStorage();
   }
 
   // === SYNCHRONOUS API (backward compatible with Map) ===
