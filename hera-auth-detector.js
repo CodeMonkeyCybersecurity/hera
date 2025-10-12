@@ -108,6 +108,64 @@ class HeraAuthProtocolDetector {
   }
 
   /**
+   * Check if a request is authentication-related
+   * @param {string} url - Request URL
+   * @param {Object} details - Request details (optional)
+   * @returns {boolean} True if request is auth-related
+   */
+  isAuthRequest(url, details = {}) {
+    try {
+      // Quick URL-based checks for common auth patterns
+      const authPatterns = [
+        '/auth',
+        '/login',
+        '/oauth',
+        '/saml',
+        '/openid',
+        '/authorize',
+        '/token',
+        '/connect',
+        '/sso',
+        '/signin',
+        '/authenticate',
+        '/.well-known',
+        '/jwks'
+      ];
+
+      const lowerUrl = url.toLowerCase();
+      if (authPatterns.some(pattern => lowerUrl.includes(pattern))) {
+        return true;
+      }
+
+      // Check query parameters for auth indicators
+      const params = this.parseParams(url);
+      const authParams = [
+        'response_type',
+        'client_id',
+        'redirect_uri',
+        'scope',
+        'state',
+        'nonce',
+        'code_challenge',
+        'SAMLRequest',
+        'SAMLResponse',
+        'access_token',
+        'id_token',
+        'refresh_token'
+      ];
+
+      if (authParams.some(param => params[param])) {
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.warn('Error in isAuthRequest:', error);
+      return false;
+    }
+  }
+
+  /**
    * Detect the authentication protocol used in a request
    */
   detectProtocol(request) {
