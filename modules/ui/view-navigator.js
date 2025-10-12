@@ -62,9 +62,10 @@ export class ViewNavigator {
 
     const refreshExtensionsBtn = document.getElementById('refreshExtensionsBtn');
     if (refreshExtensionsBtn) {
-      refreshExtensionsBtn.addEventListener('click', () => {
-        console.log('Navigation: Refreshing extensions analysis');
-        this.loadExtensionsAnalysis();
+      refreshExtensionsBtn.addEventListener('click', async () => {
+        console.log('Navigation: Refresh button clicked - reloading extensions analysis');
+        await this.loadExtensionsAnalysis();
+        console.log('Navigation: Extensions analysis reload complete');
       });
     }
 
@@ -268,21 +269,30 @@ export class ViewNavigator {
   async loadExtensionsAnalysis() {
     const extensionsContent = document.getElementById('extensionsContent');
 
-    if (!extensionsContent) return;
+    if (!extensionsContent) {
+      console.error('Navigation: extensionsContent element not found');
+      return;
+    }
+
+    console.log('Navigation: Loading extensions analysis...');
 
     try {
       // Show loading state
       extensionsContent.innerHTML = '<div class="loading-state"><p>Loading extension security assessments...</p></div>';
 
       // Request extensions analysis from background script
+      console.log('Navigation: Sending getExtensionsAnalysis message to background');
       const response = await chrome.runtime.sendMessage({ action: 'getExtensionsAnalysis' });
+      console.log('Navigation: Received response from background:', response);
 
       if (!response || !response.success) {
+        console.warn('Navigation: Extensions analysis failed or returned no data');
         extensionsContent.innerHTML = '<div class="empty-state"><p>No extensions analysis data available.</p></div>';
         return;
       }
 
       const { extensions } = response.data;
+      console.log(`Navigation: Found ${extensions?.length || 0} extensions`);
 
       if (!extensions || extensions.length === 0) {
         extensionsContent.innerHTML = '<div class="empty-state"><p>No extensions detected.</p></div>';
@@ -290,7 +300,9 @@ export class ViewNavigator {
       }
 
       // Render extensions
+      console.log('Navigation: Rendering extensions...');
       extensionsContent.innerHTML = this.renderExtensions(extensions);
+      console.log('Navigation: Extensions rendered successfully');
 
     } catch (error) {
       console.error('Failed to load extensions analysis:', error);

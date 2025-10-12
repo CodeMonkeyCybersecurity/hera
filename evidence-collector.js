@@ -102,8 +102,31 @@ class EvidenceCollector {
       }
 
       // Build evidence object with already-cleaned in-memory data
+      // CRITICAL: Strip large fields from responses to prevent storage bloat
+      const strippedResponseCache = {};
+      for (const [key, response] of this._responseCache.entries()) {
+        strippedResponseCache[key] = {
+          url: response.url,
+          method: response.method,
+          statusCode: response.statusCode,
+          timestamp: response.timestamp,
+          requestId: response.requestId,
+          tabId: response.tabId,
+          // Strip large fields
+          headers: response.headers ? Object.keys(response.headers).slice(0, 20).reduce((obj, k) => {
+            obj[k] = response.headers[k];
+            return obj;
+          }, {}) : {},
+          // Keep only first 1000 chars of responseBody
+          responseBody: response.responseBody ? response.responseBody.substring(0, 1000) + '...' : null,
+          // Strip HTML snapshots entirely
+          timing: response.timing,
+          findings: response.findings || []
+        };
+      }
+
       const evidence = {
-        responseCache: Object.fromEntries(this._responseCache.entries()),
+        responseCache: strippedResponseCache,
         flowCorrelation: Object.fromEntries(this._flowCorrelation.entries()),
         proofOfConcepts: this._proofOfConcepts.slice(-50), // Keep only last 50
         timeline: this._timeline.slice(-this.MAX_TIMELINE),

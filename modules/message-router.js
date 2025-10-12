@@ -586,6 +586,7 @@ export class MessageRouter {
   /**
    * Handle TRIGGER_ANALYSIS type message
    * Triggers analysis on the active tab's content script
+   * Automatically injects content script if not present
    */
   async handleTriggerAnalysis(sendResponse) {
     try {
@@ -610,23 +611,76 @@ export class MessageRouter {
 
       console.log('Hera: Triggering analysis on tab:', activeTab.id, activeTab.url);
 
-      // Send message to content script to trigger analysis
-      chrome.tabs.sendMessage(activeTab.id, { type: 'TRIGGER_ANALYSIS' }, (response) => {
-        if (chrome.runtime.lastError) {
-          console.error('Error triggering analysis:', chrome.runtime.lastError);
-          sendResponse({
-            success: false,
-            error: 'Content script not ready. Try refreshing the page.'
-          });
-        } else if (response && response.success) {
-          sendResponse({
-            success: true,
-            score: response.score
-          });
+      // First, try to ping the content script to see if it's already loaded
+      chrome.tabs.sendMessage(activeTab.id, { type: 'PING' }, async (pingResponse) => {
+        if (chrome.runtime.lastError || !pingResponse || !pingResponse.loaded) {
+          // Content script not loaded - inject it dynamically
+          console.log('Hera: Content script not found, injecting dynamically...');
+
+          try {
+            // Inject content script modules first
+            await chrome.scripting.executeScript({
+              target: { tabId: activeTab.id },
+              files: ['content-script.js']
+            });
+
+            console.log('Hera: Content script injected successfully');
+
+            // Wait a moment for content script to initialize
+            setTimeout(() => {
+              // Now trigger analysis
+              chrome.tabs.sendMessage(activeTab.id, { type: 'TRIGGER_ANALYSIS' }, (response) => {
+                if (chrome.runtime.lastError) {
+                  console.error('Error after injection:', chrome.runtime.lastError);
+                  sendResponse({
+                    success: false,
+                    error: 'Content script injected but analysis failed. Try refreshing the page.'
+                  });
+                } else if (response && response.success) {
+                  sendResponse({
+                    success: true,
+                    score: response.score
+                  });
+                } else {
+                  sendResponse({
+                    success: false,
+                    error: response?.error || 'Analysis failed'
+                  });
+                }
+              });
+            }, 500); // Wait 500ms for initialization
+
+          } catch (injectionError) {
+            console.error('Hera: Failed to inject content script:', injectionError);
+            sendResponse({
+              success: false,
+              error: 'Failed to inject content script. Try refreshing the page.'
+            });
+          }
         } else {
-          sendResponse({
-            success: false,
-            error: response?.error || 'Analysis failed'
+          // Content script already loaded - trigger analysis directly
+          console.log('Hera: Content script already loaded, triggering analysis');
+
+          chrome.tabs.sendMessage(activeTab.id, { type: 'TRIGGER_ANALYSIS' }, (response) => {
+            if (chrome.runtime.lastError) {
+              console.error('Error triggering analysis:', chrome.runtime.lastError.message || chrome.runtime.lastError);
+              console.error('Full error object:', JSON.stringify(chrome.runtime.lastError, null, 2));
+              sendResponse({
+                success: false,
+                error: 'Content script communication failed. Try refreshing the page.'
+              });
+            } else if (response && response.success) {
+              sendResponse({
+                success: true,
+                score: response.score
+              });
+            } else {
+              console.error('Analysis failed with response:', response);
+              sendResponse({
+                success: false,
+                error: response?.error || 'Analysis failed'
+              });
+            }
           });
         }
       });
@@ -678,8 +732,11 @@ export class MessageRouter {
    * Handle type-based messages (analysis results)
    */
   handleTypeMessage(message, sender, sendResponse) {
+    console.log('MessageRouter: handleTypeMessage called with:', { type: message.type, senderUrl: sender.url });
+
     // Skip if this is an 'action' message
     if (message.action) {
+      console.log('MessageRouter: Skipping - has action property');
       return false;
     }
 
@@ -692,9 +749,15 @@ export class MessageRouter {
 
     // Authorization for type-based messages
     const senderUrl = sender.url || '';
-    const isAuthorizedSender = this.allowedSenderUrls.some(allowed => 
+    const isAuthorizedSender = this.allowedSenderUrls.some(allowed =>
       senderUrl.startsWith(allowed)
     );
+
+    console.log('MessageRouter: Authorization check:', {
+      senderUrl,
+      isAuthorizedSender,
+      allowedUrls: this.allowedSenderUrls
+    });
 
     const contentScriptAllowedTypes = [
       'ANALYSIS_COMPLETE',
@@ -711,14 +774,18 @@ export class MessageRouter {
     }
 
     // Route type-based messages
+    console.log(`MessageRouter: Routing type-based message: ${message.type}`);
     switch (message.type) {
       case 'GET_SITE_ANALYSIS':
+        console.log('MessageRouter: Calling handleGetSiteAnalysis');
         return this.handleGetSiteAnalysis(sendResponse);
 
       case 'TRIGGER_ANALYSIS':
+        console.log('MessageRouter: Calling handleTriggerAnalysis');
         return this.handleTriggerAnalysis(sendResponse);
 
       case 'ANALYSIS_COMPLETE':
+        console.log('MessageRouter: Calling handleAnalysisComplete');
         return this.handleAnalysisComplete(message, sendResponse);
 
       case 'ANALYSIS_ERROR':

@@ -55,18 +55,25 @@ export class HeraDashboard {
    */
   async triggerManualAnalysis() {
     try {
+      console.log('Dashboard: Triggering manual analysis...');
       this.showLoadingState('Analyzing current page...');
 
+      console.log('Dashboard: Sending TRIGGER_ANALYSIS message to background');
       const response = await chrome.runtime.sendMessage({ type: 'TRIGGER_ANALYSIS' });
+      console.log('Dashboard: Received response:', response);
 
       if (response && response.success && response.score) {
+        console.log('Dashboard: Analysis successful, score:', response.score);
         setTimeout(() => this.loadDashboard(), 500);
       } else {
-        this.showErrorState('Analysis failed. Please try again.');
+        console.error('Dashboard: Analysis failed with response:', response);
+        const errorMsg = response?.error || 'Analysis failed. Please try again.';
+        this.showErrorState(errorMsg);
       }
     } catch (error) {
-      console.error('Manual analysis failed:', error);
-      this.showErrorState(error.message);
+      console.error('Dashboard: Manual analysis exception:', error);
+      console.error('Dashboard: Error stack:', error.stack);
+      this.showErrorState(error.message || 'Analysis failed. Please try again.');
     }
   }
 
