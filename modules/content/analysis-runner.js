@@ -88,58 +88,55 @@ export async function runComprehensiveAnalysis() {
     const allFindings = [];
     let analysisSuccessful = true;
 
-    // 0. Subdomain Impersonation Detection (PRIMARY - run first, fastest)
-    try {
-      console.log('Hera: Running subdomain impersonation detection...');
-      // P0-TENTH-4 FIX: Use snapshot URL to prevent TOCTOU
-      const subdomain = await detectors.subdomainImpersonationDetector.detectImpersonation(domSnapshot.url);
-      allFindings.push(...subdomain);
-    } catch (error) {
-      console.error('Hera: Subdomain impersonation detection failed:', error);
-      analysisSuccessful = false;
-    }
+    // ==================== NON-AUTH DETECTORS DISABLED ====================
+    // All content script detectors disabled to focus on auth vulnerabilities only.
+    // Auth detection happens in background.js via webRequest listeners.
 
-    // 1. Dark Pattern Detection
-    try {
-      console.log('Hera: Running dark pattern detection...');
-      const darkPatterns = await detectors.darkPatternDetector.detectPatterns(document);
-      allFindings.push(...darkPatterns);
-    } catch (error) {
-      console.error('Hera: Dark pattern detection failed:', error);
-      analysisSuccessful = false;
-    }
+    // 0. Subdomain Impersonation Detection - DISABLED (non-auth)
+    // try {
+    //   console.log('Hera: Running subdomain impersonation detection...');
+    //   const subdomain = await detectors.subdomainImpersonationDetector.detectImpersonation(domSnapshot.url);
+    //   allFindings.push(...subdomain);
+    // } catch (error) {
+    //   console.error('Hera: Subdomain impersonation detection failed:', error);
+    //   analysisSuccessful = false;
+    // }
 
-    // 2. Phishing Detection
-    try {
-      console.log('Hera: Running phishing detection...');
-      const phishing = await detectors.phishingDetector.detectPhishing(window.location.href, document);
-      allFindings.push(...phishing);
-    } catch (error) {
-      console.error('Hera: Phishing detection failed:', error);
-      analysisSuccessful = false;
-    }
+    // 1. Dark Pattern Detection - DISABLED (non-auth)
+    // try {
+    //   console.log('Hera: Running dark pattern detection...');
+    //   const darkPatterns = await detectors.darkPatternDetector.detectPatterns(document);
+    //   allFindings.push(...darkPatterns);
+    // } catch (error) {
+    //   console.error('Hera: Dark pattern detection failed:', error);
+    //   analysisSuccessful = false;
+    // }
 
-    // 3. Privacy Violation Detection
-    try {
-      console.log('Hera: Running privacy violation detection...');
-      const privacy = await detectors.privacyViolationDetector.detectViolations(window.location.href, document);
-      allFindings.push(...privacy);
-    } catch (error) {
-      console.error('Hera: Privacy violation detection failed:', error);
-      analysisSuccessful = false;
-    }
+    // 2. Phishing Detection - DISABLED (non-auth)
+    // try {
+    //   console.log('Hera: Running phishing detection...');
+    //   const phishing = await detectors.phishingDetector.detectPhishing(window.location.href, document);
+    //   allFindings.push(...phishing);
+    // } catch (error) {
+    //   console.error('Hera: Phishing detection failed:', error);
+    //   analysisSuccessful = false;
+    // }
 
-    // 4. Accessibility Analysis
-    try {
-      // Accessibility analysis removed - not relevant for security/deception detection
-    } catch (error) {
-      console.error('Hera: Accessibility analysis failed:', error);
-      analysisSuccessful = false;
-    }
+    // 3. Privacy Violation Detection - DISABLED (non-auth)
+    // try {
+    //   console.log('Hera: Running privacy violation detection...');
+    //   const privacy = await detectors.privacyViolationDetector.detectViolations(window.location.href, document);
+    //   allFindings.push(...privacy);
+    // } catch (error) {
+    //   console.error('Hera: Privacy violation detection failed:', error);
+    //   analysisSuccessful = false;
+    // }
 
-    // 5. Calculate risk score
-    console.log('Hera: Calculating risk score...');
-    const scoreData = detectors.riskScoringEngine.calculateRiskScore(allFindings);
+    // 4. Accessibility Analysis - Already removed
+
+    // 5. Calculate risk score - DISABLED (no findings from content scripts)
+    console.log('Hera: Content script analysis disabled - auth detection handled by background.js');
+    const scoreData = { score: 0, grade: 'N/A', message: 'Auth-only mode' };
 
     console.log(`Hera: Analysis complete - ${allFindings.length} findings, grade: ${scoreData.grade}`);
 

@@ -274,7 +274,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const closeSettingsBtn = document.getElementById('closeSettings');
   const enableResponseCaptureCheckbox = document.getElementById('enableResponseCapture');
   const requestDetails = document.getElementById('requestDetails');
-  
+
   // Debug: Check if buttons exist
   console.log('Button elements found:', {
     clearBtn: !!clearBtn,
@@ -299,30 +299,30 @@ document.addEventListener('DOMContentLoaded', () => {
   const sendRepeaterBtn = document.getElementById('sendRepeaterBtn');
   const repeaterRequestEl = document.getElementById('repeaterRequest');
   const repeaterResponseEl = document.getElementById('repeaterResponse');
-  
+
   let requests = [];
   let selectedRequest = null;
-  
+
   // Rate limiting for loadRequests
   let lastLoadTime = 0;
   const LOAD_COOLDOWN = 1000; // 1 second cooldown
-  
+
   // Load requests when popup opens
   loadRequests();
-  
+
   // Debug: Check if detail panel elements exist
   console.log('Detail panel elements check:');
   console.log('detailUrl exists:', !!document.getElementById('detailUrl'));
   console.log('detailMethod exists:', !!document.getElementById('detailMethod'));
   console.log('chatMessages exists:', !!document.getElementById('chatMessages'));
   console.log('dnsHostname exists:', !!document.getElementById('dnsHostname'));
-  
+
   // Auto-refresh when popup gains focus (user opens it)
   window.addEventListener('focus', () => {
     console.log('Popup gained focus - auto-refreshing data');
     loadRequests();
   });
-  
+
   // Also refresh when popup becomes visible
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
@@ -330,7 +330,7 @@ document.addEventListener('DOMContentLoaded', () => {
       loadRequests();
     }
   });
-  
+
   // Initialize collapse state variable
   let allCollapsed = false;
 
@@ -347,7 +347,7 @@ document.addEventListener('DOMContentLoaded', () => {
     collapseAllBtn.addEventListener('click', () => {
     const serviceHeaders = document.querySelectorAll('.service-header.collapsible');
     const sessionContainers = document.querySelectorAll('.session-container');
-    
+
     if (allCollapsed) {
       // Expand all
       sessionContainers.forEach(container => {
@@ -491,12 +491,12 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('Clear button clicked');
     clearRequests();
   });
-  
+
   exportBtn.addEventListener('click', (e) => {
     console.log('Export button clicked');
     exportRequests();
   });
-  
+
   if (exportAllBtn) {
     exportAllBtn.addEventListener('click', (e) => {
       console.log('Export All button clicked');
@@ -506,7 +506,7 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     console.error('exportAllBtn not found!');
   }
-  
+
   if (viewStorageBtn) {
     viewStorageBtn.addEventListener('click', (e) => {
       console.log('View Storage button clicked');
@@ -516,12 +516,12 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     console.error('viewStorageBtn not found!');
   }
-  
+
   closeDetailsBtn.addEventListener('click', (e) => {
     console.log('Close details button clicked');
     hideDetails();
   });
-  
+
   // Tab switching
   tabButtons.forEach(button => {
     button.addEventListener('click', () => {
@@ -529,7 +529,7 @@ document.addEventListener('DOMContentLoaded', () => {
       switchTab(tabName);
     });
   });
-  
+
   // Load requests from background
   function loadRequests() {
     const now = Date.now();
@@ -538,15 +538,15 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     lastLoadTime = now;
-    
+
     console.log('Loading requests...'); // Debug log
-    
+
     // Add loading indicator
     if (requestsList) {
       const loadingDiv = DOMSecurity.createSafeElement('div', 'Loading sessions...', { className: 'loading' });
       DOMSecurity.replaceChildren(requestsList, loadingDiv);
     }
-    
+
     chrome.runtime.sendMessage({ action: 'getRequests' }, response => {
       console.log('Received response:', response); // Debug log
       if (chrome.runtime.lastError) {
@@ -562,7 +562,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return;
       }
-      
+
       if (!response) {
         console.warn('No response received from background script');
         if (requestsList) {
@@ -576,18 +576,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return;
       }
-      
+
       requests = Array.isArray(response) ? response : []; // Ensure it's an array
       console.log('Parsed requests:', requests.length, 'items'); // Debug log
-      
+
       // Sort by timestamp (newest first) to ensure latest data appears first
       requests.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      
+
       renderRequests();
       renderFindings();
     });
   }
-  
+
   // Render the list of requests organized by sessions
   function renderRequests() {
     if (requests.length === 0) {
@@ -605,11 +605,11 @@ document.addEventListener('DOMContentLoaded', () => {
     requests.forEach(request => {
       const service = request.service || request.sessionInfo?.service || 'Unknown';
       const sessionId = request.sessionId || request.sessionInfo?.sessionId || 'unknown';
-      
+
       if (!sessionGroups[service]) {
         sessionGroups[service] = {};
       }
-      
+
       if (!sessionGroups[service][sessionId]) {
         sessionGroups[service][sessionId] = {
           requests: [],
@@ -618,11 +618,11 @@ document.addEventListener('DOMContentLoaded', () => {
           eventCount: 0
         };
       }
-      
+
       sessionGroups[service][sessionId].requests.push(request);
       sessionGroups[service][sessionId].eventCount++;
     });
-    
+
     console.log('Session groups:', sessionGroups);
     requestsList.innerHTML = '';
 
@@ -644,17 +644,17 @@ document.addEventListener('DOMContentLoaded', () => {
       headerContent.appendChild(serviceTitle);
       headerContent.appendChild(sessionCount);
       serviceHeader.appendChild(headerContent);
-      
+
       // Create container for sessions
       const sessionContainer = document.createElement('div');
       sessionContainer.className = 'session-container';
       sessionContainer.style.display = 'block'; // Start expanded
-      
+
       // Add click handler for collapse/expand
       serviceHeader.addEventListener('click', () => {
         const isCollapsed = sessionContainer.style.display === 'none';
         const icon = serviceHeader.querySelector('.collapse-icon');
-        
+
         if (isCollapsed) {
           sessionContainer.style.display = 'block';
           icon.textContent = '▼';
@@ -667,14 +667,14 @@ document.addEventListener('DOMContentLoaded', () => {
           console.log(`📁 Collapsed ${service} session`);
         }
       });
-      
+
       requestsList.appendChild(serviceHeader);
-      
+
       // Render each session within the service
       Object.entries(sessions).forEach(([sessionId, sessionData]) => {
         const sessionHeader = document.createElement('div');
         sessionHeader.className = 'session-header';
-        
+
         // Get all unique domains for this session
         const domains = [...new Set(sessionData.requests.map(r => {
           try {
@@ -683,7 +683,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return r.sessionInfo?.domain || 'unknown';
           }
         }))];
-        
+
         const domainDisplay = domains.length === 1
           ? DOMSecurity.sanitizeHTML(domains[0])
           : `${domains.length} domains: ${domains.slice(0, 2).map(d => DOMSecurity.sanitizeHTML(d)).join(', ')}${domains.length > 2 ? '...' : ''}`;
@@ -707,7 +707,7 @@ document.addEventListener('DOMContentLoaded', () => {
         sessionInfo.appendChild(sessionTime);
         sessionHeader.appendChild(sessionInfo);
         sessionContainer.appendChild(sessionHeader);
-        
+
         // Render requests in this session (newest first)
         sessionData.requests.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).forEach(request => {
           const requestEl = document.createElement('div');
@@ -748,7 +748,7 @@ document.addEventListener('DOMContentLoaded', () => {
           sessionContainer.appendChild(requestEl);
         });
       });
-      
+
       // Add the session container to the main list
       requestsList.appendChild(sessionContainer);
     });
@@ -1251,28 +1251,28 @@ By: Hera Security Extension
       console.error('Request not found:', requestId);
       return;
     }
-    
+
     console.log('Selected request:', selectedRequest);
     console.log('Request headers:', selectedRequest.requestHeaders);
     console.log('Response headers:', selectedRequest.responseHeaders);
     console.log('Request body:', selectedRequest.requestBody);
     console.log('Response body:', selectedRequest.responseBody);
     console.log('Metadata:', selectedRequest.metadata);
-    
+
     // Debug header data specifically
     console.log('Header Debug Info:');
     console.log('  - requestHeaders type:', typeof selectedRequest.requestHeaders);
     console.log('  - requestHeaders length:', selectedRequest.requestHeaders?.length);
     console.log('  - responseHeaders type:', typeof selectedRequest.responseHeaders);
     console.log('  - responseHeaders length:', selectedRequest.responseHeaders?.length);
-    
+
     if (selectedRequest.requestHeaders) {
       console.log('  - First few request headers:', selectedRequest.requestHeaders.slice(0, 3));
     }
     if (selectedRequest.responseHeaders) {
       console.log('  - First few response headers:', selectedRequest.responseHeaders.slice(0, 3));
     }
-    
+
     const elements = {
       detailUrl: document.getElementById('detailUrl'),
       detailMethod: document.getElementById('detailMethod'),
@@ -1290,28 +1290,28 @@ By: Hera Security Extension
     } else {
       console.error('detailUrl element not found');
     }
-    
+
     if (detailMethod) {
       detailMethod.textContent = selectedRequest.method || 'GET';
       console.log('Set method:', selectedRequest.method || 'GET');
     } else {
       console.error('detailMethod element not found');
     }
-    
+
     if (detailStatus) {
       detailStatus.textContent = selectedRequest.statusCode || 'Pending';
       console.log('Set status:', selectedRequest.statusCode || 'Pending');
     } else {
       console.error('detailStatus element not found');
     }
-    
+
     if (detailType) {
       detailType.textContent = selectedRequest.authType || 'Unknown';
       console.log('Set type:', selectedRequest.authType || 'Unknown');
     } else {
       console.error('detailType element not found');
     }
-    
+
     if (detailTime) {
       const timeInfo = TimeUtils.formatTimeWithRelative(selectedRequest.timestamp);
       detailTime.textContent = `${timeInfo.relative} (${timeInfo.full})`;
@@ -1343,7 +1343,7 @@ By: Hera Security Extension
     if (elements.detailInitiator) {
       elements.detailInitiator.textContent = selectedRequest.initiator || 'Unknown';
     }
-    
+
     // Display IP and location data
     if (elements.detailServerIP) {
       const dnsIntel = selectedRequest.metadata?.dnsIntelligence;
@@ -1353,7 +1353,7 @@ By: Hera Security Extension
         elements.detailServerIP.textContent = 'Not resolved';
       }
     }
-    
+
     if (elements.detailLocation) {
       const dnsIntel = selectedRequest.metadata?.dnsIntelligence;
       const geoData = dnsIntel?.ipAddresses?.geoLocations?.[0];
@@ -1407,28 +1407,28 @@ By: Hera Security Extension
     populateAuthSecurityOverview(selectedRequest);
 
     console.log('Updated overview tab elements');
-    
+
     // DNS Intelligence Tab with IP Information
     const dnsIntel = selectedRequest.metadata?.dnsIntelligence || {};
     const ipAddresses = dnsIntel.ipAddresses || {};
-    
+
     const dnsHostnameEl = document.getElementById('dnsHostname');
     const dnsHomographEl = document.getElementById('dnsHomograph');
     const dnsDGAEl = document.getElementById('dnsDGA');
     const dnsCountryEl = document.getElementById('dnsCountry');
     const dnsOrgEl = document.getElementById('dnsOrg');
-    
+
     if (dnsHostnameEl) dnsHostnameEl.textContent = dnsIntel.hostname || 'N/A';
     if (dnsHomographEl) dnsHomographEl.textContent = dnsIntel.isHomograph ? 'Yes (Warning)' : 'No';
     if (dnsDGAEl) dnsDGAEl.textContent = dnsIntel.isDGA ? 'Yes (Warning)' : 'No';
     if (dnsCountryEl) dnsCountryEl.textContent = dnsIntel.geoLocation?.country || 'Unknown';
     if (dnsOrgEl) dnsOrgEl.textContent = dnsIntel.geoLocation?.organization || 'Unknown';
-    
+
     // Display IP addresses
     const ipContainer = document.getElementById('ipAddresses') || createIPContainer();
     if (ipContainer) {
       ipContainer.innerHTML = '';
-      
+
       if (ipAddresses.ipv4Addresses && ipAddresses.ipv4Addresses.length > 0) {
         const ipSection = document.createElement('div');
         ipSection.className = 'ip-section';
@@ -1512,13 +1512,13 @@ By: Hera Security Extension
         ipContainer.appendChild(noData);
       }
     }
-    
+
     // Update headers tab
     const requestHeadersEl = document.getElementById('requestHeaders');
     const responseHeadersEl = document.getElementById('responseHeaders');
     const requestBodyEl = document.getElementById('requestBody');
     const responseBodyEl = document.getElementById('responseBody');
-    
+
     if (requestHeadersEl) {
       const formattedHeaders = formatHeaders(selectedRequest.requestHeaders);
       requestHeadersEl.textContent = formattedHeaders || 'No request headers available';
@@ -1529,13 +1529,13 @@ By: Hera Security Extension
     }
     // Update body tab with enhanced status
     updateBodyTabWithStatus(selectedRequest);
-    
+
     // Update conversation tab
     updateConversationView(selectedRequest);
-    
+
     // Update consent tab
     updateConsentDisplay(selectedRequest);
-    
+
     // Update security tab
     updateSecurityAnalysis(selectedRequest);
 
@@ -1555,7 +1555,7 @@ By: Hera Security Extension
     requestDetails.style.display = 'flex';
     requestDetails.classList.add('show');
     console.log('Detail panel shown');
-    
+
     // Activate the first tab
     switchTab('overview');
     console.log('Switched to overview tab');
@@ -1744,22 +1744,22 @@ By: Hera Security Extension
   if (refreshExtensionsBtn) {
     refreshExtensionsBtn.addEventListener('click', loadExtensionAssessments);
   }
-  
+
   // Update conversation view with chat-like interface
   function updateConversationView(request) {
     const chatMessages = document.getElementById('chatMessages');
     if (!chatMessages) return;
-    
+
     chatMessages.innerHTML = '';
-    
+
     // Create request message (from browser)
     const requestMessage = document.createElement('div');
     requestMessage.className = 'chat-message browser-message';
-    
+
     const timeInfo = TimeUtils.formatTimeWithRelative(request.timestamp);
     const requestTime = timeInfo.relative;
     const requestUrl = new URL(request.url);
-    
+
     // Extract meaningful data from request
     let requestData = '';
     if (request.requestBody) {
@@ -1775,7 +1775,7 @@ By: Hera Security Extension
         }
       }
     }
-    
+
     // SECURITY FIX: Use DOM methods instead of innerHTML to prevent XSS
     const messageHeader = document.createElement('div');
     messageHeader.className = 'message-header';
@@ -1814,17 +1814,17 @@ By: Hera Security Extension
 
     requestMessage.appendChild(messageHeader);
     requestMessage.appendChild(messageBubble);
-    
+
     chatMessages.appendChild(requestMessage);
-    
+
     // Create response message (from server) if available
     if (request.statusCode) {
       const responseMessage = document.createElement('div');
       responseMessage.className = 'chat-message server-message';
-      
+
       const statusEmoji = request.statusCode >= 400 ? 'ERROR' : request.statusCode >= 200 ? 'SUCCESS' : 'PENDING';
       const statusText = request.statusCode >= 400 ? 'Error' : request.statusCode >= 200 ? 'Success' : 'Pending';
-      
+
       // Extract meaningful data from response
       let responseData = '';
       if (request.responseBody) {
@@ -1843,7 +1843,7 @@ By: Hera Security Extension
           }
         }
       }
-      
+
       // SECURITY FIX: Use DOM methods instead of innerHTML to prevent XSS
       const respHeader = document.createElement('div');
       respHeader.className = 'message-header';
@@ -1879,7 +1879,7 @@ By: Hera Security Extension
 
       responseMessage.appendChild(respHeader);
       responseMessage.appendChild(respBubble);
-      
+
       chatMessages.appendChild(responseMessage);
     } else {
       // Show waiting for response
@@ -1919,7 +1919,7 @@ By: Hera Security Extension
 
       waitingMessage.appendChild(waitHeader);
       waitingMessage.appendChild(waitBubble);
-      
+
       chatMessages.appendChild(waitingMessage);
     }
   }
@@ -1928,7 +1928,7 @@ By: Hera Security Extension
   function createIPContainer() {
     const dnsTab = document.querySelector('[data-tab="dns"]');
     if (!dnsTab) return null;
-    
+
     let ipContainer = document.getElementById('ipAddresses');
     if (!ipContainer) {
       ipContainer = document.createElement('div');
@@ -1938,7 +1938,7 @@ By: Hera Security Extension
     }
     return ipContainer;
   }
-  
+
   // Hide request details
   function hideDetails() {
     requestDetails.style.display = 'none';
@@ -1992,23 +1992,23 @@ By: Hera Security Extension
       });
     });
   }
-  
+
   // Switch between tabs
   function switchTab(tabName) {
     console.log('Switching to tab:', tabName);
-    
+
     // Hide all tab contents
     const allTabContents = document.querySelectorAll('.tab-content');
     allTabContents.forEach(content => {
       content.classList.remove('active');
     });
-    
+
     // Remove active class from all buttons
     const allTabButtons = document.querySelectorAll('.tab-btn');
     allTabButtons.forEach(button => {
       button.classList.remove('active');
     });
-    
+
     // Show selected tab content
     const selectedTab = document.getElementById(tabName + 'Tab');
     if (selectedTab) {
@@ -2017,7 +2017,7 @@ By: Hera Security Extension
     } else {
       console.error('Tab not found:', tabName + 'Tab');
     }
-    
+
     // Add active class to selected button
     const selectedButton = document.querySelector(`[data-tab="${tabName}"]` );
     if (selectedButton) {
@@ -2027,7 +2027,7 @@ By: Hera Security Extension
       console.error('Button not found for tab:', tabName);
     }
   }
-  
+
   // Clear all requests
   function clearRequests() {
     if (confirm('Are you sure you want to clear all captured requests?')) {
@@ -2040,7 +2040,7 @@ By: Hera Security Extension
       });
     }
   }
-  
+
   // Export captured requests
   function exportRequests() {
     // Show export format selection modal
@@ -2450,7 +2450,7 @@ By: Hera Security Extension
     }
     return allRequests;
   }
-  
+
   // Export all stored sessions
   function exportAllSessions() {
     console.log('exportAllSessions function called');
@@ -2490,7 +2490,7 @@ By: Hera Security Extension
       alert('Error exporting sessions: ' + error.message);
     }
   }
-  
+
   // View storage statistics
   function viewStorageStats() {
     console.log('viewStorageStats function called');
@@ -2504,7 +2504,7 @@ By: Hera Security Extension
           totalStorageKeys: Object.keys(allData).length,
           estimatedSize: JSON.stringify(allData).length
         };
-        
+
         // Create stats modal
         const modal = document.createElement('div');
         modal.style.cssText = `
@@ -2520,7 +2520,7 @@ By: Hera Security Extension
           justify-content: center;
           font-family: -apple-system, sans-serif;
         `;
-        
+
         modal.innerHTML = `
           <div style="
             background: white;
@@ -2530,34 +2530,34 @@ By: Hera Security Extension
             width: 90%;
           ">
             <h2 style="margin: 0 0 20px 0; color: #333;">Hera Storage Statistics</h2>
-            
+
             <div style="margin-bottom: 15px;">
               <strong>Total Sessions Stored:</strong> ${stats.heraSessions.toLocaleString()}
             </div>
-            
+
             <div style="margin-bottom: 15px;">
               <strong>Pending Sync Events:</strong> ${stats.syncQueue}
             </div>
-            
+
             <div style="margin-bottom: 15px;">
               <strong>Configuration:</strong> ${stats.heraConfig}
             </div>
-            
+
             <div style="margin-bottom: 15px;">
               <strong>Storage Keys:</strong> ${stats.totalStorageKeys}
             </div>
-            
+
             <div style="margin-bottom: 25px;">
               <strong>Estimated Size:</strong> ${(stats.estimatedSize / 1024).toFixed(1)} KB
             </div>
-            
+
             <div style="background: #f5f5f5; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
               <strong>Storage Location:</strong><br>
               <code style="font-size: 11px; color: #666;">
                 ~/Library/Application Support/Google/Chrome/Default/Local Extension Settings/
               </code>
             </div>
-            
+
             <div style="display: flex; gap: 10px; justify-content: flex-end;">
               <button id="closeStatsModal" style="
                 background: #4CAF50;
@@ -2582,26 +2582,26 @@ By: Hera Security Extension
             </div>
           </div>
         `;
-        
+
         document.body.appendChild(modal);
-        
+
         // Add event listeners for modal buttons
         const closeBtn = modal.querySelector('#closeStatsModal');
         const exportBtn = modal.querySelector('#exportAllDataModal');
-        
+
         if (closeBtn) {
           closeBtn.addEventListener('click', () => {
             modal.remove();
           });
         }
-        
+
         if (exportBtn) {
           exportBtn.addEventListener('click', () => {
             exportAllSessions();
             modal.remove();
           });
         }
-        
+
       });
     } catch (error) {
       console.error('Error in viewStorageStats:', error);
@@ -2637,8 +2637,8 @@ By: Hera Security Extension
       return String(body);
     }
   }
-  
-  
+
+
   // Test function for debugging buttons
   function testAllButtons() {
     console.log('Testing all buttons...');
@@ -2646,13 +2646,13 @@ By: Hera Security Extension
     console.log('exportBtn exists:', !!exportBtn);
     console.log('exportAllBtn exists:', !!exportAllBtn);
     console.log('viewStorageBtn exists:', !!viewStorageBtn);
-    
+
     // Test if functions exist
     console.log('clearRequests function exists:', typeof clearRequests === 'function');
     console.log('exportRequests function exists:', typeof exportRequests === 'function');
     console.log('exportAllSessions function exists:', typeof exportAllSessions === 'function');
     console.log('viewStorageStats function exists:', typeof viewStorageStats === 'function');
-    
+
     // Test storage access
     console.log('Testing storage access...');
     chrome.storage.local.get(['heraSessions'], (result) => {
@@ -2663,22 +2663,22 @@ By: Hera Security Extension
       }
     });
   }
-  
+
   // Make functions globally available
   window.hera = window.hera || {};
   window.hera.exportAllData = exportAllSessions;
   window.hera.testButtons = testAllButtons;
-  
+
   // Make dismissAlert globally available
   window.dismissAlert = function() {
     const alertsEl = document.getElementById('consentAlerts');
     if (alertsEl) alertsEl.style.display = 'none';
   };
-  
+
   // Format headers for display
   function formatHeaders(headers) {
     if (!headers) return null;
-    
+
     // Handle different header formats
     if (Array.isArray(headers)) {
       if (headers.length === 0) return null;
@@ -2692,14 +2692,14 @@ By: Hera Security Extension
         .map(([name, value]) => `${name}: ${value}`)
         .join('\n');
     }
-    
+
     return null;
   }
 
   // Format request/response body for display
   function formatBody(body) {
     if (!body) return null;
-    
+
     try {
       // Try to parse and pretty-print JSON
       if (typeof body === 'string') {
@@ -2733,7 +2733,7 @@ By: Hera Security Extension
     const consentWarningsEl = document.getElementById('consentWarnings');
     const scopeAnalysisEl = document.getElementById('scopeAnalysis');
     const applicationInfoEl = document.getElementById('applicationInfo');
-    
+
     if (consentAnalysisEl) {
       // P0-FOURTEENTH-1 FIX: Escape JSON output to prevent XSS
       if (request.metadata?.consentAnalysis) {
@@ -2746,15 +2746,15 @@ By: Hera Security Extension
         consentAnalysisEl.textContent = 'No consent analysis data available';
       }
     }
-    
+
     if (consentWarningsEl) {
       consentWarningsEl.innerHTML = 'No consent warnings detected';
     }
-    
+
     if (scopeAnalysisEl) {
       scopeAnalysisEl.innerHTML = 'No scope analysis available';
     }
-    
+
     if (applicationInfoEl) {
       applicationInfoEl.innerHTML = 'No application information available';
     }
@@ -3059,25 +3059,25 @@ By: Hera Security Extension
   function showSecurityAlert(message) {
     const alertsEl = document.getElementById('securityAlerts');
     const messageEl = document.getElementById('alertMessage');
-    
+
     if (alertsEl && messageEl) {
       messageEl.textContent = message;
       alertsEl.style.display = 'block';
-      
+
       // Auto-hide after 10 seconds
       setTimeout(() => {
         alertsEl.style.display = 'none';
       }, 10000);
     }
   }
-  
+
   window.dismissSecurityAlert = function() {
     const alertsEl = document.getElementById('securityAlerts');
     if (alertsEl) {
       alertsEl.style.display = 'none';
     }
   };
-  
+
   // Check for security issues in requests
   function checkSecurityIssues(requests) {
     requests.forEach(request => {
@@ -3085,12 +3085,12 @@ By: Hera Security Extension
       if (request.metadata?.backendSecurity?.riskScore > 70) {
         showSecurityAlert(`High risk backend detected: ${new URL(request.url).hostname}`);
       }
-      
+
       // Check for suspicious domains
       if (request.metadata?.dnsIntelligence?.isHomograph) {
         showSecurityAlert(`Potential phishing domain detected: ${new URL(request.url).hostname}`);
       }
-      
+
       // Check for insecure authentication flows
       if (request.authType === 'OAuth 2.0' && !request.url.includes('https://')) {
         showSecurityAlert(`Insecure OAuth flow detected (HTTP instead of HTTPS)`);
@@ -3318,7 +3318,7 @@ By: Hera Security Extension
 
         ${ldapRequests.length > 0 ? `
           <div class="finding-section">
-            <h3>🔐 LDAP Authentication Detected</h3>
+            <h3> LDAP Authentication Detected</h3>
             <div class="finding-list">
               ${ldapRequests.map(req => `
                 <div class="finding-item">

@@ -5,8 +5,8 @@
 export class StorageManager {
   constructor() {
     this.QUOTA_WARNING_THRESHOLD = 0.8; // 80% of quota
-    this.MAX_SESSIONS = 1000; // Hard limit on stored sessions
-    this.SESSION_RETENTION_HOURS = 24; // P0 FIX: Auto-delete sessions after 24 hours
+    this.MAX_SESSIONS = 500; // Reduced from 1000 (auth-only mode needs less)
+    this.SESSION_RETENTION_HOURS = 168; // 7 days (reduced from 24h for auth monitoring)
 
     // P0-TENTH-2 FIX: Per-origin limits
     this.MAX_SESSIONS_PER_ORIGIN = 50; // Max 50 sessions per domain
@@ -40,13 +40,33 @@ export class StorageManager {
     return true;
   }
 
+  // Helper: Check if this is an auth-related request
+  _isAuthRelated(url, method) {
+    const authPatterns = [
+      '/oauth', '/authorize', '/token', '/login', '/signin', '/auth',
+      '/api/auth', '/session', '/connect', '/saml', '/oidc', '/scim',
+      '/sso', '/.well-known', '/openid', '/ldap', '/kerberos',
+      '/mfa', '/2fa', '/otp', '/verify', '/password', '/register',
+      '/signup', '/logout', '/callback', '/federation'
+    ];
+    const urlLower = url.toLowerCase();
+    return authPatterns.some(pattern => urlLower.includes(pattern));
+  }
+
   // Store authentication event
   // P0 FIX: Now uses mutex, encryption, redaction, and auto-cleanup
   // P0-ARCH-1 FIX: Fast atomic cleanup without slow decryption
+  // AUTH-ONLY MODE: Only stores auth-related sessions
   async storeAuthEvent(eventData) {
     // P0-NINTH-2 FIX: Proper mutex - wrap the entire async operation
     this.storageLock = this.storageLock.then(async () => {
       try {
+        // AUTH-ONLY MODE: Skip non-auth requests
+        if (!this._isAuthRelated(eventData.url, eventData.method)) {
+          console.log(`Hera: Skipping non-auth session: ${eventData.url}`);
+          return;
+        }
+
         // P0-TENTH-2 FIX: Extract origin from URL
         let origin;
         try {

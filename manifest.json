@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Hera by Code Monkey Cybersecurity",
-  "version": "1.0",
-  "description": "Security testing extension: detects phishing, dark patterns, privacy violations. Inspects OAuth/OIDC/SAML flows. Includes active security probes (requires consent). Uses Cloudflare DNS and IP geolocation APIs.",
+  "name": "Hera Auth Security Monitor",
+  "version": "2.0",
+  "description": "Authentication & Authorization vulnerability detection. Monitors OAuth/OIDC/SAML/SCIM flows, JWT tokens, session security, password strength, MFA usage, and common auth misconfigurations.",
   "permissions": [
     "storage",
     "downloads",
@@ -29,16 +29,12 @@
     {
       "matches": ["<all_urls>"],
       "js": [
-        "modules/subdomain-impersonation-detector.js",
-        "modules/dark-pattern-detector.js",
-        "modules/phishing-detector.js",
-        "modules/privacy-violation-detector.js",
-        "modules/risk-scoring-engine.js",
         "content-script.js"
       ],
       "run_at": "document_idle",
       "all_frames": false,
-      "world": "ISOLATED"
+      "world": "ISOLATED",
+      "comment": "Non-auth detectors disabled: subdomain-impersonation, dark-pattern, phishing, privacy-violation, risk-scoring"
     }
   ],
   "action": {

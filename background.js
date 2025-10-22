@@ -1,37 +1,38 @@
 /**
- * HERA - OAuth/OIDC/SAML Security Testing Extension
+ * HERA - Authentication & Authorization Security Monitor
  * Code Monkey Cybersecurity - "Cybersecurity. With humans."
  *
- * 🛡️ ACTIVE DETECTION LAYERS (Currently Operational)
+ * 🛡️ ACTIVE DETECTION LAYERS (Auth-Focused)
  *
- * ✅ OAuth/SAML Flow Security - CSRF, PKCE, state parameter validation
+ * ✅ OAuth/OIDC/SAML Flow Security - CSRF, PKCE, state parameter validation
+ * ✅ SCIM Protocol Analysis - Provisioning security
+ * ✅ JWT Security - Token validation, signature verification
+ * ✅ Session Security - Fixation, hijacking, replay detection
  * ✅ Certificate Analysis - HTTPS/TLS integrity, domain matching
- * ✅ DNS Intelligence - Homograph attacks, DGA detection, geolocation
- * ✅ Session Tracking - Cross-domain correlation, ecosystem detection
- * ✅ Secret Scanning - Hardcoded credentials, JWT vulnerabilities
- * ✅ Dark Pattern Detection - UI manipulation, deceptive practices
- * ✅ Privacy Violation Detection - GDPR compliance, consent validation
- * ✅ PhishZip Compression Analysis - Visual clone detection
+ * ✅ Password Security - Entropy analysis, common patterns
+ * ✅ MFA Detection - TOTP, HOTP, WebAuthn, passkeys
+ * ✅ Port/Service Auth - Default credentials, LDAP, Kerberos, RADIUS
+ * ✅ Authorization Analysis - Scope validation, permission checks
  *
  * Philosophy: HONEST, evidence-based, human-centric security
- * - Document what actually works (not marketing claims)
+ * - Focus on authentication vulnerabilities only
  * - Show users real findings with explanations
  * - Respect user agency - inform, don't patronize
  *
- * 📊 SECURITY REVIEW STATUS
- * - Reviews 10-17: Fixed 35+ critical issues
- * - Review 17: Modularized monolithic background.js (3260 lines → focused modules)
+ * 📊 SIMPLIFIED & REFOCUSED (2025)
+ * - Disabled non-auth features (phishing, dark patterns, privacy, compression)
+ * - Streamlined to auth vulnerability detection only
  */
 
-// ==================== CORE MODULES ====================
+// ==================== CORE MODULES (AUTH-FOCUSED) ====================
 import { HeraAuthProtocolDetector } from './hera-auth-detector.js';
-import { HeraSecretScanner } from './hera-secret-scanner.js';
-import { HeraMaliciousExtensionDetector } from './hera-extension-security.js';
+// import { HeraSecretScanner } from './hera-secret-scanner.js'; // DISABLED - Non-essential
+// import { HeraMaliciousExtensionDetector } from './hera-extension-security.js'; // DISABLED - Non-auth
 import { HeraAuthSecurityAnalyzer } from './hera-auth-security-analyzer.js';
 import { HeraPortAuthAnalyzer } from './hera-port-auth-analyzer.js';
 import { EvidenceCollector } from './evidence-collector.js';
 import { AlertManager } from './alert-manager.js';
-import { HeraCompressionAnalyzer } from './modules/hera-compression-analyzer.js';
+// import { HeraCompressionAnalyzer } from './modules/hera-compression-analyzer.js'; // DISABLED - PhishZip (non-auth)
 
 // ==================== INFRASTRUCTURE MODULES ====================
 import { storageManager } from './modules/storage-manager.js';
@@ -66,13 +67,13 @@ let initializationPromise = null;
 // Initialize core components
 const evidenceCollector = new EvidenceCollector();
 const alertManager = new AlertManager();
-const compressionAnalyzer = new HeraCompressionAnalyzer();
-let compressionAnalyzerReady = false;
+// const compressionAnalyzer = new HeraCompressionAnalyzer(); // DISABLED - PhishZip
+// let compressionAnalyzerReady = false; // DISABLED
 
-// Initialize detectors
+// Initialize detectors (AUTH-ONLY)
 const heraAuthDetector = new HeraAuthProtocolDetector(evidenceCollector);
-const heraSecretScanner = new HeraSecretScanner();
-const heraExtensionDetector = new HeraMaliciousExtensionDetector();
+// const heraSecretScanner = new HeraSecretScanner(); // DISABLED - Already commented out in file
+// const heraExtensionDetector = new HeraMaliciousExtensionDetector(); // DISABLED - Non-auth
 const heraAuthSecurityAnalyzer = new HeraAuthSecurityAnalyzer();
 const heraPortAuthAnalyzer = new HeraPortAuthAnalyzer();
 
@@ -167,15 +168,15 @@ async function initializeHera() {
       ipCacheManager.initPromise
     ]);
 
-    // Initialize compression analyzer
-    try {
-      await compressionAnalyzer.initialize();
-      compressionAnalyzerReady = true;
-      console.log('Hera: Compression analyzer initialized (PhishZip enabled)');
-    } catch (error) {
-      console.warn('Hera: Compression analyzer initialization failed - PhishZip disabled:', error);
-      compressionAnalyzerReady = false;
-    }
+    // Initialize compression analyzer - DISABLED (non-auth feature)
+    // try {
+    //   await compressionAnalyzer.initialize();
+    //   compressionAnalyzerReady = true;
+    //   console.log('Hera: Compression analyzer initialized (PhishZip enabled)');
+    // } catch (error) {
+    //   console.warn('Hera: Compression analyzer initialization failed - PhishZip disabled:', error);
+    //   compressionAnalyzerReady = false;
+    // }
 
     // Run startup cleanup
     try {

@@ -36,19 +36,18 @@ export class AlarmHandlers {
     else if (alarm.name === 'checkStorageQuota') {
       await this.storageManager.checkStorageQuota();
     } 
-    else if (alarm.name.startsWith('heraProbeConsent_')) {
-      // P1-TENTH-3 FIX: Handle unique alarm names with UUIDs
-      // P0-ARCH-2 FIX: Auto-revoke probe consent when alarm fires
-      const { probeConsentManager } = await import('./probe-consent.js');
-      await probeConsentManager.revokeConsent();
-      console.log('Hera: Probe consent auto-revoked (24h expiry)');
-    } 
-    else if (alarm.name === 'heraPrivacyConsentExpiry') {
-      // P0-ARCH-2 FIX: Auto-revoke privacy consent when alarm fires
-      const { privacyConsentManager } = await import('./privacy-consent.js');
-      await privacyConsentManager.withdrawConsent();
-      console.log('Hera: Privacy consent auto-revoked (expiry)');
-    }
+    // DISABLED - Probe consent feature removed (auth-only mode)
+    // else if (alarm.name.startsWith('heraProbeConsent_')) {
+    //   const { probeConsentManager } = await import('./probe-consent.js');
+    //   await probeConsentManager.revokeConsent();
+    //   console.log('Hera: Probe consent auto-revoked (24h expiry)');
+    // }
+    // DISABLED - Privacy consent feature removed (auth-only mode)
+    // else if (alarm.name === 'heraPrivacyConsentExpiry') {
+    //   const { privacyConsentManager } = await import('./privacy-consent.js');
+    //   await privacyConsentManager.withdrawConsent();
+    //   console.log('Hera: Privacy consent auto-revoked (expiry)');
+    // }
   }
 
   /**

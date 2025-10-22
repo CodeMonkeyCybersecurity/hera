@@ -8,11 +8,11 @@ let detectors = null;
 let loadingPromise = null; // CRITICAL FIX NEW-P0-2: Mutex for concurrent loading
 
 /**
- * CRITICAL FIX P0-1: Load detectors from manifest injection
- * Detectors are loaded via manifest content_scripts (no dynamic imports)
- * This fixes CSP issues on GitHub, Gmail, banking sites, etc.
+ * AUTH-ONLY MODE: Content script detectors disabled
+ * All non-auth detectors removed from manifest.json
+ * Auth detection now handled exclusively by background.js via webRequest listeners
  *
- * @returns {Promise<Object>} Detector objects
+ * @returns {Promise<Object>} Empty detector object (for backward compatibility)
  */
 export async function loadDetectors() {
   // Return cached detectors if already loaded
@@ -20,41 +20,21 @@ export async function loadDetectors() {
     return detectors;
   }
 
-  // Wait for detectors to be available (they load before content-script.js in manifest)
-  const maxWait = 50; // 50 * 100ms = 5 seconds max
-  let attempts = 0;
+  // AUTH-ONLY MODE: No content script detectors loaded
+  // All detection happens in background.js via HTTP interception
+  console.log('Hera: Auth-only mode - content script detectors disabled');
 
-  while (attempts < maxWait) {
-    if (window.HeraSubdomainImpersonationDetector &&
-        window.subdomainImpersonationDetector &&
-        window.darkPatternDetector &&
-        window.phishingDetector &&
-        window.privacyViolationDetector &&
-        window.riskScoringEngine) {
-      // All detectors loaded successfully!
-      detectors = {
-        subdomainImpersonationDetector: window.subdomainImpersonationDetector,
-        darkPatternDetector: window.darkPatternDetector,
-        phishingDetector: window.phishingDetector,
-        privacyViolationDetector: window.privacyViolationDetector,
-        riskScoringEngine: window.riskScoringEngine
-      };
-      detectorsLoaded = true;
-      console.log('Hera: All 5 detectors loaded from manifest (CSP-safe, no dynamic imports)');
-      return detectors;
-    }
+  detectors = {
+    // Return empty/stub detectors for backward compatibility
+    subdomainImpersonationDetector: null,
+    darkPatternDetector: null,
+    phishingDetector: null,
+    privacyViolationDetector: null,
+    riskScoringEngine: null
+  };
 
-    // Wait a bit for scripts to load
-    await new Promise(resolve => setTimeout(resolve, 100));
-    attempts++;
-  }
-
-  // Fallback to stubs if detectors didn't load within timeout
-  console.error('Hera: Detectors failed to load from manifest within 5s, using stubs');
-  const stubDetectors = createStubDetectors();
-  detectors = stubDetectors;
   detectorsLoaded = true;
-  return stubDetectors;
+  return detectors;
 }
 
 /**

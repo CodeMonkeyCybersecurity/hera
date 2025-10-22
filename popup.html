@@ -2,38 +2,75 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Hera by Code Monkey Cybersecurity</title>
+  <title>Hera Auth Security Monitor</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div class="container">
     <header>
-      <h1>Hera</h1>
+      <h1> Hera Auth Monitor</h1>
       <div class="controls">
-        <button id="clearBtn" title="Clear all captured requests">Clear All</button>
-        <button id="exportBtn" title="Export current view">Export</button>
-        <button id="exportAllBtn" title="Export all sessions">Export All</button>
-        <button id="viewStorageBtn" title="View storage statistics">Storage</button>
-        <button id="refreshBtn" title="Refresh the request list">Refresh</button>
-        <button id="collapseAllBtn" title="Collapse all expanded items">Collapse All</button>
-        <button id="findingsBtn" title="View all security findings">Findings</button>
-        <button id="portsBtn" title="View port analysis and auth types">Ports/Auth</button>
-        <button id="extensionsBtn" title="View extension security assessments">Extensions</button>
-        <button id="dashboardBtn" title="View site safety dashboard" class="active">Dashboard</button>
-        <button id="requestsBtn" title="View all requests">Requests</button>
+        <button id="dashboardBtn" title="View auth dashboard" class="active">Dashboard</button>
+        <button id="requestsBtn" title="View auth requests">Requests</button>
+        <button id="vulnerabilitiesBtn" title="View auth vulnerabilities">Vulnerabilities</button>
+        <button id="exportBtn" title="Export evidence">Export</button>
+        <button id="clearBtn" title="Clear all data">Clear</button>
         <button id="settingsBtn" title="Settings">Settings</button>
       </div>
     </header>
 
-    <!-- Site Safety Dashboard -->
+    <!-- Auth Dashboard -->
     <div class="dashboard-panel" id="dashboardPanel">
       <div class="dashboard-header">
-        <h2>Site Safety Dashboard</h2>
-        <button id="triggerAnalysisBtn" class="refresh-btn">Analyze Current Page</button>
+        <h2>Authentication Status</h2>
+        <button id="refreshDashboardBtn" class="refresh-btn">Refresh</button>
       </div>
       <div class="dashboard-content" id="dashboardContent">
-        <div class="loading-state">
-          <p>Loading site analysis...</p>
+        <div class="current-site-status">
+          <div class="site-info">
+            <span class="label">Current Site:</span>
+            <span class="value" id="currentSiteUrl">Loading...</span>
+          </div>
+          <div class="auth-status-badge" id="authStatusBadge">
+            <span class="status-icon">🔄</span>
+            <span class="status-text">Analyzing...</span>
+          </div>
+        </div>
+
+        <!-- Auth Flows Summary -->
+        <div class="auth-flows-section">
+          <h3>🔑 Authentication Flows</h3>
+          <div id="authFlowsList" class="auth-flows-list">
+            <div class="empty-state">No auth flows detected yet</div>
+          </div>
+        </div>
+
+        <!-- Vulnerabilities Summary -->
+        <div class="vulnerabilities-section">
+          <h3>⚠️ Vulnerabilities</h3>
+          <div id="vulnerabilitiesList" class="vulnerabilities-list">
+            <div class="empty-state">No vulnerabilities found</div>
+          </div>
+        </div>
+
+        <!-- Quick Stats -->
+        <div class="quick-stats">
+          <div class="stat-card">
+            <span class="stat-value" id="statOAuthFlows">0</span>
+            <span class="stat-label">OAuth Flows</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="statSessions">0</span>
+            <span class="stat-label">Sessions</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="statVulns">0</span>
+            <span class="stat-label">Vulnerabilities</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="statPorts">0</span>
+            <span class="stat-label">Ports</span>
+          </div>
         </div>
       </div>
     </div>
@@ -71,10 +108,10 @@
         </div>
       </div>
     </div>
-    
+
     <!-- Real-time consent warnings -->
     <div class="consent-alerts" id="consentAlerts" style="display: none;"></div>
-    
+
     <!-- Security alerts -->
     <div class="security-alerts" id="securityAlerts" style="display: none;">
       <div class="alert-content">
@@ -83,77 +120,41 @@
         <button class="alert-close" onclick="dismissSecurityAlert()">×</button>
       </div>
     </div>
-    
-    <div class="findings-list" id="findingsList" style="display: none;">
-      <div class="findings-header">
-        <h2>🔍 Security Findings</h2>
-        <div class="findings-controls">
-          <select id="findingSeverityFilter" title="Filter by severity">
+
+    <!-- Vulnerabilities Panel (replaces Findings) -->
+    <div class="vulnerabilities-panel" id="vulnerabilitiesPanel" style="display: none;">
+      <div class="vulnerabilities-header">
+        <h2>⚠️ Authentication Vulnerabilities</h2>
+        <div class="vulnerabilities-controls">
+          <select id="vulnSeverityFilter" title="Filter by severity">
             <option value="all">All Severities</option>
             <option value="critical">Critical</option>
             <option value="high">High</option>
             <option value="medium">Medium</option>
             <option value="low">Low</option>
+            <option value="info">Info</option>
           </select>
-          <select id="findingSortBy" title="Sort findings">
-            <option value="severity">Sort by Severity</option>
-            <option value="count">Sort by Count</option>
-            <option value="type">Sort by Type</option>
+          <select id="vulnTypeFilter" title="Filter by type">
+            <option value="all">All Types</option>
+            <option value="oauth">OAuth/OIDC</option>
+            <option value="saml">SAML</option>
+            <option value="session">Session</option>
+            <option value="password">Password</option>
+            <option value="jwt">JWT</option>
+            <option value="csrf">CSRF</option>
           </select>
-          <input type="text" id="findingSearch" placeholder="Search findings..." />
-          <button id="exportFindingsBtn" class="export-btn" title="Export findings">Export</button>
         </div>
       </div>
-      <div class="findings-summary" id="findingsSummary">
+      <div class="vulnerabilities-summary" id="vulnerabilitiesSummary">
         <div class="summary-stats">
-          <span id="totalFindings">0 findings</span>
-          <span id="criticalCount" class="severity-stat critical">0 critical</span>
-          <span id="highCount" class="severity-stat high">0 high</span>
-          <span id="mediumCount" class="severity-stat medium">0 medium</span>
-          <span id="lowCount" class="severity-stat low">0 low</span>
+          <span id="totalVulns">0 vulnerabilities</span>
+          <span id="criticalVulns" class="severity-stat critical">0 critical</span>
+          <span id="highVulns" class="severity-stat high">0 high</span>
+          <span id="mediumVulns" class="severity-stat medium">0 medium</span>
+          <span id="lowVulns" class="severity-stat low">0 low</span>
         </div>
       </div>
-      <div class="findings-content" id="findingsContent"></div>
-    </div>
-    <div class="extensions-list" id="extensionsList" style="display: none;">
-      <div class="extensions-header">
-        <h2>🛡️ Extension Security Assessment</h2>
-        <button id="refreshExtensionsBtn" class="refresh-btn">Refresh</button>
-      </div>
-      <div class="extensions-content" id="extensionsContent">
-        <div class="loading-state">
-          <p>Loading extension security assessments...</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Ports and Auth Analysis Panel -->
-    <div class="ports-analysis" id="portsAnalysis" style="display: none;">
-      <div class="ports-header">
-        <h2> Port Security & Authentication Analysis</h2>
-        <button id="refreshPortsBtn" class="refresh-btn">Refresh</button>
-      </div>
-      <div class="ports-summary" id="portsSummary">
-        <div class="port-stats">
-          <div class="stat-card">
-            <h3>Port Distribution</h3>
-            <div id="portDistribution"></div>
-          </div>
-          <div class="stat-card">
-            <h3>Authentication Types</h3>
-            <div id="authTypes"></div>
-          </div>
-          <div class="stat-card">
-            <h3>Security Risks</h3>
-            <div id="portRisks"></div>
-          </div>
-        </div>
-      </div>
-      <div class="ports-content" id="portsContent">
-        <div class="loading-state">
-          <p>Loading port and authentication analysis...</p>
-        </div>
-      </div>
+      <div class="vulnerabilities-content" id="vulnerabilitiesContent"></div>
     </div>
 
     <div class="requests-list" id="requestsList">
@@ -162,7 +163,7 @@
         <p>Navigate to a website that uses OAuth, OIDC, SAML, or SCIM.</p>
       </div>
     </div>
-    
+
     <div class="request-details" id="requestDetails">
       <div class="details-header">
         <h2>Request Details</h2>
@@ -182,7 +183,7 @@
           <button class="tab-btn" data-tab="security">Security</button>
           <button class="tab-btn" data-tab="token" style="display: none;">Token</button>
         </div>
-        
+
         <div class="tab-content active" id="overviewTab">
           <div class="detail-row">
             <span class="label">URL:</span>
@@ -255,7 +256,7 @@
             <div class="auth-security-content" id="authSecurityContent"></div>
           </div>
         </div>
-        
+
         <div class="tab-content" id="conversationTab">
           <div class="conversation-container">
             <div class="conversation-header">
@@ -267,28 +268,28 @@
             </div>
           </div>
         </div>
-        
+
         <div class="tab-content" id="consentTab">
           <h3>OAuth Consent Analysis</h3>
           <div id="consentAnalysis"></div>
-          
+
           <h3>Consent Warnings</h3>
           <div id="consentWarnings"></div>
-          
+
           <h3>Requested Permissions</h3>
           <div id="scopeAnalysis"></div>
-          
+
           <h3>Application Information</h3>
           <div id="applicationInfo"></div>
         </div>
-        
+
         <div class="tab-content" id="headersTab">
           <h3>Request Headers</h3>
           <pre id="requestHeaders"></pre>
           <h3>Response Headers</h3>
           <pre id="responseHeaders"></pre>
         </div>
-        
+
         <div class="tab-content" id="bodyTab">
           <div class="body-section">
             <div class="body-header">
@@ -306,7 +307,7 @@
             <pre id="responseBody"></pre>
           </div>
         </div>
-        
+
         <div class="tab-content" id="dnsTab">
           <h3>DNS Intelligence & IP Analysis</h3>
           <div class="detail-row">
@@ -329,46 +330,46 @@
             <span class="label">Organization:</span>
             <span class="value" id="dnsOrg"></span>
           </div>
-          
+
           <!-- IP addresses will be dynamically added here -->
           <div id="ipAddresses"></div>
         </div>
-        
+
         <div class="tab-content" id="metadataTab">
           <h3>Network & Timing</h3>
           <div id="networkMetadata"></div>
-          
+
           <h3>Authentication Flow</h3>
           <div id="authFlowMetadata"></div>
-          
+
           <h3>Security Context</h3>
           <div id="securityMetadata"></div>
-          
+
           <h3>Browser Context</h3>
           <div id="browserMetadata"></div>
-          
+
           <h3>Cookie Analysis</h3>
           <div id="cookieMetadata"></div>
-          
+
           <h3>Failures & Errors</h3>
           <div id="failureMetadata"></div>
-          
+
           <h3>DNS Intelligence</h3>
           <div id="dnsIntelligence"></div>
-          
+
           <h3>CDN & Infrastructure</h3>
           <div id="cdnAnalysis"></div>
-          
+
           <h3>Network Chain</h3>
           <div id="networkChain"></div>
-          
+
           <h3>Authentication Protocols</h3>
           <div id="authProtocols"></div>
-          
+
           <h3>Backend Security</h3>
           <div id="backendSecurity"></div>
         </div>
-        
+
         <div class="tab-content" id="securityTab">
           <h3>Security Analysis</h3>
           <div id="securityFindings"></div>
