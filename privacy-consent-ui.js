@@ -1,8 +1,8 @@
-/**
+/*
  * Privacy Consent UI Controller
  *
  * Handles user interaction for privacy consent (GDPR compliance)
- */
+
 
 // Import privacy consent manager
 import { privacyConsentManager } from './modules/privacy-consent.js';
@@ -71,3 +71,5 @@ function showStatus(message, type) {
   statusMessage.className = `status ${type}`;
   statusMessage.style.display = 'block';
 }
+ */
+
