@@ -461,6 +461,64 @@ class JWTValidator {
     const parts = str.split('.');
     return parts.length === 3 && parts[0].length > 10 && parts[1].length > 10;
   }
+
+  /**
+   * Analyze request data for JWTs and return findings
+   * Called by WebRequestListeners.registerCompleted()
+   */
+  analyzeRequest(requestData, url) {
+    const findings = [];
+
+    // Extract headers as object
+    const headers = {};
+    if (requestData.requestHeaders) {
+      requestData.requestHeaders.forEach(h => {
+        headers[h.name.toLowerCase()] = h.value;
+      });
+    }
+    if (requestData.responseHeaders) {
+      requestData.responseHeaders.forEach(h => {
+        headers[h.name.toLowerCase()] = h.value;
+      });
+    }
+
+    // Extract cookies
+    const cookies = {};
+    if (requestData.metadata?.responseAnalysis?.cookies) {
+      requestData.metadata.responseAnalysis.cookies.forEach(c => {
+        cookies[c.name] = c.value;
+      });
+    }
+
+    // Extract body
+    const body = requestData.responseBody || requestData.requestBody;
+
+    // Find all JWTs
+    const tokens = this.extractJWTs(headers, body, cookies);
+
+    // Validate each token
+    for (const { location, token } of tokens) {
+      const validation = this.validateJWT(token);
+
+      if (!validation.valid || validation.issues.length > 0) {
+        findings.push({
+          type: 'JWT_SECURITY',
+          severity: validation.riskScore > 70 ? 'CRITICAL' : validation.riskScore > 40 ? 'HIGH' : 'MEDIUM',
+          location: location,
+          message: validation.issues.map(i => i.message).join('; '),
+          details: {
+            token: token.substring(0, 50) + '...', // Truncate for display
+            issues: validation.issues,
+            riskScore: validation.riskScore,
+            validationResult: validation
+          },
+          timestamp: Date.now()
+        });
+      }
+    }
+
+    return findings;
+  }
 }
 
 export { JWTValidator };

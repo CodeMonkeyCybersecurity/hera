@@ -481,6 +481,95 @@ class SessionSecurityAnalyzer {
 
     return cookie;
   }
+
+  /**
+   * Analyze request for session security issues
+   * Called by WebRequestListeners.registerCompleted()
+   */
+  analyzeRequest(requestData, url, responseHeaders) {
+    const findings = [];
+
+    try {
+      const parsedUrl = new URL(url);
+      const isHttps = parsedUrl.protocol === 'https:';
+
+      // Extract Set-Cookie headers from response
+      const setCookieHeaders = [];
+      if (responseHeaders) {
+        responseHeaders.forEach(header => {
+          if (header.name.toLowerCase() === 'set-cookie') {
+            setCookieHeaders.push(header.value);
+          }
+        });
+      }
+
+      // Parse cookies
+      const cookies = {};
+      for (const setCookie of setCookieHeaders) {
+        const cookie = this.parseCookie(setCookie);
+        cookies[cookie.name] = cookie;
+      }
+
+      // Analyze session cookies
+      if (Object.keys(cookies).length > 0) {
+        const cookieIssues = this.analyzeSessionCookies(cookies, url, isHttps);
+        findings.push(...cookieIssues);
+      }
+
+      // Detect CSRF vulnerabilities
+      // Transform requestData to the format detectCSRF expects
+      const headers = {};
+      if (requestData.requestHeaders) {
+        requestData.requestHeaders.forEach(h => {
+          headers[h.name.toLowerCase()] = h.value;
+        });
+      }
+
+      const csrfRequest = {
+        method: requestData.method || 'GET',
+        headers: headers,
+        body: requestData.requestBody,
+        cookies: cookies
+      };
+
+      const csrfIssue = this.detectCSRF(csrfRequest, url);
+      if (csrfIssue) {
+        findings.push(csrfIssue);
+      }
+
+      // Detect session fixation
+      const isAuthRequest = url.toLowerCase().includes('/login') ||
+                           url.toLowerCase().includes('/signin') ||
+                           url.toLowerCase().includes('/auth');
+      const isAuthResponse = requestData.statusCode >= 200 && requestData.statusCode < 400;
+
+      if (isAuthRequest && isAuthResponse) {
+        const sessionId = this._extractSessionId(cookies);
+        if (sessionId) {
+          const fixationIssue = this.detectSessionFixation(sessionId, url, isAuthRequest, isAuthResponse);
+          if (fixationIssue) {
+            findings.push(fixationIssue);
+          }
+        }
+      }
+
+    } catch (error) {
+      console.error('SessionSecurityAnalyzer error:', error);
+    }
+
+    return findings;
+  }
+
+  /**
+   * Extract session ID from cookies
+   */
+  _extractSessionId(cookies) {
+    const sessionCookies = this._identifySessionCookies(cookies);
+    for (const [name, cookie] of Object.entries(sessionCookies)) {
+      return cookie.value; // Return first session cookie value
+    }
+    return null;
+  }
 }
 
 export { SessionSecurityAnalyzer };

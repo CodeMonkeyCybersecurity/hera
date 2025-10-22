@@ -14,7 +14,10 @@ export class WebRequestListeners {
     evidenceCollector,
     storageManager,
     sessionTracker,
-    decodeRequestBody
+    decodeRequestBody,
+    jwtValidator = null,
+    sessionSecurityAnalyzer = null,
+    scimAnalyzer = null
   ) {
     this.heraReady = heraReady;
     this.authRequests = authRequests;
@@ -24,6 +27,9 @@ export class WebRequestListeners {
     this.storageManager = storageManager;
     this.sessionTracker = sessionTracker;
     this.decodeRequestBody = decodeRequestBody;
+    this.jwtValidator = jwtValidator;
+    this.sessionSecurityAnalyzer = sessionSecurityAnalyzer;
+    this.scimAnalyzer = scimAnalyzer;
   }
 
   /**
@@ -257,7 +263,44 @@ export class WebRequestListeners {
           // Analyze response headers
           const responseAnalysis = analyzeResponseHeaders(details.responseHeaders);
           requestData.metadata.responseAnalysis = responseAnalysis;
-          
+
+          // NEW: JWT validation (check headers and body for JWTs)
+          if (this.jwtValidator) {
+            const jwtFindings = this.jwtValidator.analyzeRequest(requestData, details.url);
+            if (jwtFindings.length > 0) {
+              if (!requestData.metadata.securityFindings) {
+                requestData.metadata.securityFindings = [];
+              }
+              requestData.metadata.securityFindings.push(...jwtFindings);
+            }
+          }
+
+          // NEW: Session security analysis
+          if (this.sessionSecurityAnalyzer) {
+            const sessionFindings = this.sessionSecurityAnalyzer.analyzeRequest(
+              requestData,
+              details.url,
+              details.responseHeaders
+            );
+            if (sessionFindings.length > 0) {
+              if (!requestData.metadata.securityFindings) {
+                requestData.metadata.securityFindings = [];
+              }
+              requestData.metadata.securityFindings.push(...sessionFindings);
+            }
+          }
+
+          // NEW: SCIM protocol analysis
+          if (this.scimAnalyzer && this.scimAnalyzer.isSCIMEndpoint(details.url)) {
+            const scimFindings = this.scimAnalyzer.analyzeSCIMRequest(requestData, details.url);
+            if (scimFindings.length > 0) {
+              if (!requestData.metadata.securityFindings) {
+                requestData.metadata.securityFindings = [];
+              }
+              requestData.metadata.securityFindings.push(...scimFindings);
+            }
+          }
+
           // Get tab information for browser context
           if (details.tabId >= 0) {
             chrome.tabs.get(details.tabId, (tab) => {

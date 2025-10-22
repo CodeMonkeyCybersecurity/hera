@@ -34,11 +34,16 @@ import { EvidenceCollector } from './evidence-collector.js';
 import { AlertManager } from './alert-manager.js';
 // import { HeraCompressionAnalyzer } from './modules/hera-compression-analyzer.js'; // DISABLED - PhishZip (non-auth)
 
+// ==================== NEW AUTH ANALYZERS ====================
+import { JWTValidator } from './modules/auth/jwt-validator.js';
+import { SessionSecurityAnalyzer } from './modules/auth/session-security-analyzer.js';
+import { SCIMAnalyzer } from './modules/auth/scim-analyzer.js';
+
 // ==================== INFRASTRUCTURE MODULES ====================
 import { storageManager } from './modules/storage-manager.js';
 import { memoryManager } from './modules/memory-manager.js';
 import { sessionTracker } from './modules/session-tracker.js';
-import { ipCacheManager } from './modules/ip-cache.js';
+// import { ipCacheManager } from './modules/ip-cache.js'; // DISABLED - IP cache feature commented out
 import { DebuggerManager } from './modules/debugger-manager.js';
 import { EventHandlers } from './modules/event-handlers.js';
 import { AlarmHandlers } from './modules/alarm-handlers.js';
@@ -51,6 +56,7 @@ import { decodeRequestBody, generateSessionId } from './modules/request-decoder.
 
 // ==================== UTILITY MODULES ====================
 import { SecurityValidation } from './modules/security-validation.js';
+import { errorCollector } from './modules/error-collector.js';
 
 // ==================== GLOBAL CONFIGURATION ====================
 const ALLOWED_SCRIPTS = new Set([
@@ -76,6 +82,11 @@ const heraAuthDetector = new HeraAuthProtocolDetector(evidenceCollector);
 // const heraExtensionDetector = new HeraMaliciousExtensionDetector(); // DISABLED - Non-auth
 const heraAuthSecurityAnalyzer = new HeraAuthSecurityAnalyzer();
 const heraPortAuthAnalyzer = new HeraPortAuthAnalyzer();
+
+// Initialize new auth analyzers (2025)
+const jwtValidator = new JWTValidator();
+const sessionSecurityAnalyzer = new SessionSecurityAnalyzer();
+const scimAnalyzer = new SCIMAnalyzer();
 
 // Initialize managers
 const debuggerManager = new DebuggerManager(memoryManager);
@@ -156,6 +167,7 @@ async function initializeHera() {
   if (heraReady) return;
 
   console.log('Hera: Starting initialization...');
+  console.log('Hera: Error collector active - runtime errors will be captured and exportable');
   const startTime = Date.now();
 
   try {
@@ -164,8 +176,8 @@ async function initializeHera() {
       memoryManager.initPromise,
       sessionTracker.initPromise,
       evidenceCollector.initPromise,
-      alertManager.initPromise,
-      ipCacheManager.initPromise
+      alertManager.initPromise
+      // ipCacheManager.initPromise // DISABLED - IP cache removed
     ]);
 
     // Initialize compression analyzer - DISABLED (non-auth feature)
@@ -221,7 +233,10 @@ const webRequestListeners = new WebRequestListeners(
   evidenceCollector,
   storageManager,
   sessionTracker,
-  decodeRequestBody
+  decodeRequestBody,
+  jwtValidator,
+  sessionSecurityAnalyzer,
+  scimAnalyzer
 );
 
 // Initialize debugger events
@@ -230,7 +245,7 @@ const debuggerEvents = new DebuggerEvents(
   authRequests,
   debugTargets,
   heraAuthDetector,
-  heraSecretScanner,
+  // heraSecretScanner,
   storageManager,
   updateBadge
 );
@@ -245,7 +260,8 @@ const messageRouter = new MessageRouter(
   updateBadge,
   null, // handleInterceptorInjection - will be added in Phase 3
   generateSessionId,
-  heraStore
+  heraStore,
+  errorCollector
 );
 
 // Register all handlers

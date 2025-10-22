@@ -9,7 +9,7 @@ export class ViewNavigator {
     this.views = {
       dashboard: 'dashboardPanel',
       requests: 'requestsList',
-      findings: 'findingsList',
+      vulnerabilities: 'vulnerabilitiesPanel',
       ports: 'portsAnalysis',
       extensions: 'extensionsList'
     };
@@ -25,7 +25,7 @@ export class ViewNavigator {
     this.buttons = {
       dashboard: document.getElementById('dashboardBtn'),
       requests: document.getElementById('requestsBtn'),
-      findings: document.getElementById('findingsBtn'),
+      vulnerabilities: document.getElementById('vulnerabilitiesBtn'),
       ports: document.getElementById('portsBtn'),
       extensions: document.getElementById('extensionsBtn')
     };
@@ -34,7 +34,7 @@ export class ViewNavigator {
     this.panels = {
       dashboard: document.getElementById('dashboardPanel'),
       requests: document.getElementById('requestsList'),
-      findings: document.getElementById('findingsList'),
+      vulnerabilities: document.getElementById('vulnerabilitiesPanel'),
       ports: document.getElementById('portsAnalysis'),
       extensions: document.getElementById('extensionsList')
     };

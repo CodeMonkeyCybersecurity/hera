@@ -27,6 +27,19 @@ const errors = [];
 const warnings = [];
 let checksRun = 0;
 
+// Files to skip validation (commented out, disabled, or known issues)
+const IGNORE_FILES = [
+  'exposed-backend-detector.js', // Entirely commented out
+  'hera-sads.js', // Disabled feature
+  'evidence-based-reporter.js', // Disabled feature
+  'scripts/validate-extension.js', // This script itself (contains regexes with brackets)
+];
+
+function shouldIgnoreFile(filePath) {
+  const relativePath = path.relative(rootDir, filePath);
+  return IGNORE_FILES.some(ignored => relativePath.includes(ignored));
+}
+
 function log(message, color = 'reset') {
   console.log(`${colors[color]}${message}${colors.reset}`);
 }
@@ -129,18 +142,31 @@ function validateImports() {
 
   // First pass: collect all exports
   for (const file of jsFiles) {
-    if (file.includes('node_modules') || file.includes('.backup.') || file.includes('-backup.')) {
+    if (file.includes('node_modules') || file.includes('.backup.') || file.includes('-backup.') || shouldIgnoreFile(file)) {
       continue;
     }
 
     const content = fs.readFileSync(file, 'utf8');
     const relativePath = path.relative(rootDir, file);
 
-    // Find exports
-    const exportMatches = content.matchAll(/export\s+(?:class|function|const|let|var|{)\s+(\w+)/g);
+    // Find exports - handle multiple patterns
     const exports = [];
+
+    // Pattern 1: export class/function/const X (with optional async)
+    const exportMatches = content.matchAll(/export\s+(?:async\s+)?(?:class|function|const|let|var)\s+(\w+)/g);
     for (const match of exportMatches) {
       exports.push(match[1]);
+    }
+
+    // Pattern 2: export { X, Y, Z }
+    const exportBlockMatches = content.matchAll(/export\s+{\s*([^}]+)\s*}/g);
+    for (const match of exportBlockMatches) {
+      const names = match[1].split(',').map(n => {
+        // Handle "as" aliases: export { X as Y }
+        const parts = n.trim().split(/\s+as\s+/);
+        return parts[parts.length - 1].trim();
+      });
+      exports.push(...names);
     }
 
     const defaultExportMatch = content.match(/export\s+default\s+(\w+)/);
@@ -155,7 +181,7 @@ function validateImports() {
 
   // Second pass: validate imports
   for (const file of jsFiles) {
-    if (file.includes('node_modules') || file.includes('.backup.') || file.includes('-backup.')) {
+    if (file.includes('node_modules') || file.includes('.backup.') || file.includes('-backup.') || shouldIgnoreFile(file)) {
       continue;
     }
 
@@ -176,7 +202,11 @@ function validateImports() {
       const importMatch = line.match(/import\s+(?:{([^}]+)}|(\w+))\s+from\s+['"]([^'"]+)['"]/);
       if (!importMatch) continue;
 
-      const namedImports = importMatch[1] ? importMatch[1].split(',').map(s => s.trim()) : [];
+      // Handle named imports with "as" aliases: import { X as Y }
+      const namedImports = importMatch[1] ? importMatch[1].split(',').map(s => {
+        const parts = s.trim().split(/\s+as\s+/);
+        return parts[0].trim(); // Use original name, not alias
+      }) : [];
       const defaultImport = importMatch[2];
       const importPath = importMatch[3];
 
@@ -233,12 +263,22 @@ function validateSyntax() {
   let syntaxErrors = 0;
 
   for (const file of jsFiles) {
-    if (file.includes('node_modules') || file.includes('.backup.') || file.includes('-backup.')) {
+    if (file.includes('node_modules') || file.includes('.backup.') || file.includes('-backup.') || shouldIgnoreFile(file)) {
       continue;
     }
 
     try {
       const content = fs.readFileSync(file, 'utf8');
+
+      // Skip syntax checking for files with mostly commented content
+      const lines = content.split('\n');
+      const commentedLines = lines.filter(l => l.trim().startsWith('//')).length;
+      const totalLines = lines.length;
+      if (commentedLines / totalLines > 0.9) {
+        // File is >90% commented, skip syntax checking
+        continue;
+      }
+
       // Try to detect obvious syntax errors
 
       // Check for unmatched braces
@@ -287,7 +327,7 @@ function findProblematicComments() {
   let issues = 0;
 
   for (const file of jsFiles) {
-    if (file.includes('node_modules') || file.includes('.backup.') || file.includes('-backup.')) {
+    if (file.includes('node_modules') || file.includes('.backup.') || file.includes('-backup.') || shouldIgnoreFile(file)) {
       continue;
     }
 

@@ -46,7 +46,7 @@ export class HeraDashboard {
       }
     } catch (error) {
       console.error('Failed to load dashboard:', error);
-      this.showErrorState(error.message);
+      this.showErrorState(error?.message || String(error) || 'Unknown error');
     }
   }
 
@@ -121,8 +121,9 @@ export class HeraDashboard {
     gradeDisplay.appendChild(gradeLabel);
 
     // Risk badge
-    const riskBadge = DOMSecurity.createSafeElement('div', score.riskLevel.toUpperCase(), {
-      className: `dashboard-risk-badge risk-${score.riskLevel}`
+    const riskLevel = score.riskLevel || 'unknown';
+    const riskBadge = DOMSecurity.createSafeElement('div', riskLevel.toUpperCase(), {
+      className: `dashboard-risk-badge risk-${riskLevel}`
     });
 
     // Summary
@@ -227,8 +228,9 @@ export class HeraDashboard {
             const issueHeader = document.createElement('div');
             issueHeader.className = 'issue-header-inline';
 
-            const severityBadge = DOMSecurity.createSafeElement('span', issue.severity.toUpperCase(), {
-              className: `severity-badge ${issue.severity}`
+            const issueSeverity = issue.severity || 'info';
+            const severityBadge = DOMSecurity.createSafeElement('span', issueSeverity.toUpperCase(), {
+              className: `severity-badge ${issueSeverity}`
             });
             const issueTitle = DOMSecurity.createSafeElement('span', issue.title, { className: 'issue-title-inline' });
 

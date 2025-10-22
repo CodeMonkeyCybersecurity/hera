@@ -10,7 +10,7 @@ export class SessionRenderer {
   constructor() {
     this.requests = [];
     this.requestsList = null;
-    this.findingsList = null;
+    this.vulnerabilitiesList = null; // Renamed from findingsList
     this.lastLoadTime = 0;
     this.LOAD_COOLDOWN = 1000; // 1 second
     this.allCollapsed = false;
@@ -21,7 +21,7 @@ export class SessionRenderer {
    */
   initialize() {
     this.requestsList = document.getElementById('requestsList');
-    this.findingsList = document.getElementById('findingsList');
+    this.vulnerabilitiesList = document.getElementById('vulnerabilitiesList'); // Renamed from findingsList
 
     // Set up refresh button
     const refreshBtn = document.getElementById('refreshBtn');
@@ -362,7 +362,7 @@ export class SessionRenderer {
       const emptyDiv = DOMSecurity.createSafeElement('div', '', { className: 'empty-state' });
       const emptyMsg = DOMSecurity.createSafeElement('p', 'No security findings yet.');
       emptyDiv.appendChild(emptyMsg);
-      DOMSecurity.replaceChildren(this.findingsList, emptyDiv);
+      DOMSecurity.replaceChildren(this.vulnerabilitiesList, emptyDiv);
       return;
     }
 
@@ -376,11 +376,11 @@ export class SessionRenderer {
       const emptyDiv = DOMSecurity.createSafeElement('div', '', { className: 'empty-state' });
       const emptyMsg = DOMSecurity.createSafeElement('p', 'No security issues detected.');
       emptyDiv.appendChild(emptyMsg);
-      DOMSecurity.replaceChildren(this.findingsList, emptyDiv);
+      DOMSecurity.replaceChildren(this.vulnerabilitiesList, emptyDiv);
       return;
     }
 
-    this.findingsList.innerHTML = '';
+    this.vulnerabilitiesList.innerHTML = '';
     sortedIssues.forEach(issue => {
       this.renderFinding(issue);
     });
@@ -488,7 +488,7 @@ export class SessionRenderer {
       window.dispatchEvent(new CustomEvent('showRequestsForFinding', { detail: issue }));
     });
 
-    this.findingsList.appendChild(findingEl);
+    this.vulnerabilitiesList.appendChild(findingEl);
   }
 
   /**

@@ -16,7 +16,8 @@ export class MessageRouter {
     updateBadge,
     handleInterceptorInjection,
     generateSessionId,
-    heraStore
+    heraStore,
+    errorCollector = null
   ) {
     this.authRequests = authRequests;
     this.debugTargets = debugTargets;
@@ -27,6 +28,7 @@ export class MessageRouter {
     this.handleInterceptorInjection = handleInterceptorInjection;
     this.generateSessionId = generateSessionId;
     this.heraStore = heraStore;
+    this.errorCollector = errorCollector;
 
     // Authorization configuration
     this.allowedSenderUrls = [
@@ -177,15 +179,24 @@ export class MessageRouter {
       
       case 'clearRequests':
         return this.handleClearRequests(sendResponse);
-      
+
       case 'updateResponseCaptureSetting':
         return this.handleUpdateResponseCapture(message, sendResponse);
-      
+
+      case 'getErrors':
+        return this.handleGetErrors(sendResponse);
+
+      case 'exportErrors':
+        return this.handleExportErrors(message, sendResponse);
+
+      case 'clearErrors':
+        return this.handleClearErrors(sendResponse);
+
       case 'openPopup':
       case 'showTechnicalDetails':
         sendResponse({ success: true });
         return false;
-      
+
       default:
         console.warn(`Unknown action: ${action}`);
         sendResponse({ success: false, error: 'Unknown action' });
@@ -852,5 +863,58 @@ export class MessageRouter {
         console.log('Hera: DevTools panel disconnected');
       });
     }
+  }
+
+  /**
+   * Handle getErrors action - Return collected errors
+   */
+  handleGetErrors(sendResponse) {
+    if (!this.errorCollector) {
+      sendResponse({ success: false, error: 'Error collector not available' });
+      return false;
+    }
+
+    const stats = this.errorCollector.getErrorStats();
+    sendResponse({
+      success: true,
+      errors: this.errorCollector.errors,
+      warnings: this.errorCollector.warnings,
+      stats: stats
+    });
+    return false;
+  }
+
+  /**
+   * Handle exportErrors action - Download errors as file
+   */
+  async handleExportErrors(message, sendResponse) {
+    if (!this.errorCollector) {
+      sendResponse({ success: false, error: 'Error collector not available' });
+      return false;
+    }
+
+    try {
+      const format = message.format || 'json';
+      await this.errorCollector.downloadErrors(format);
+      sendResponse({ success: true });
+    } catch (error) {
+      console.error('Error exporting errors:', error);
+      sendResponse({ success: false, error: error.message });
+    }
+    return false;
+  }
+
+  /**
+   * Handle clearErrors action - Clear all collected errors
+   */
+  handleClearErrors(sendResponse) {
+    if (!this.errorCollector) {
+      sendResponse({ success: false, error: 'Error collector not available' });
+      return false;
+    }
+
+    this.errorCollector.clearErrors();
+    sendResponse({ success: true });
+    return false;
   }
 }
