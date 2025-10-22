@@ -10,7 +10,11 @@
     "lint:background": "eslint background.js modules/background --ext .js",
     "lint:content": "eslint content-script.js modules/content --ext .js",
     "lint:popup": "eslint popup.js modules/ui --ext .js",
-    "lint:watch": "nodemon --watch . --ext js --exec 'npm run lint'"
+    "lint:watch": "nodemon --watch . --ext js --exec 'npm run lint'",
+    "validate": "node scripts/validate-extension.js",
+    "check": "npm run lint && npm run validate",
+    "preload": "npm run check",
+    "test": "npm run check"
   },
   "keywords": [
     "chrome-extension",

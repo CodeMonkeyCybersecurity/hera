@@ -3,7 +3,8 @@
  * Handles authorization, validation, and routing to appropriate handlers
  */
 
-import { performAlgNoneProbe, performRepeaterRequest } from './security-probes.js';
+// AUTH-ONLY MODE: Security probes disabled
+// import { performAlgNoneProbe, performRepeaterRequest } from './security-probes.js';
 
 export class MessageRouter {
   constructor(
@@ -281,38 +282,20 @@ export class MessageRouter {
    * Handle probe:alg_none action
    */
   handleProbeAlgNone(message, sender, sendResponse) {
-    if (!message.request || !message.jwt) {
-      sendResponse({ success: false, error: 'Missing request or JWT' });
-      return false;
-    }
-
-    performAlgNoneProbe(message.request, message.jwt, sender)
-      .then(sendResponse)
-      .catch(error => {
-        console.error('Hera: probe:alg_none failed:', error);
-        sendResponse({ success: false, error: error.message });
-      });
-    
-    return true;
+    // AUTH-ONLY MODE: Security probes disabled
+    console.warn('Hera: alg:none probe disabled in auth-only mode');
+    sendResponse({ success: false, error: 'Security probes disabled in auth-only mode' });
+    return false;
   }
 
   /**
    * Handle repeater:send action
    */
   handleRepeaterSend(message, sender, sendResponse) {
-    if (!message.rawRequest || typeof message.rawRequest !== 'string') {
-      sendResponse({ success: false, error: 'Missing or invalid rawRequest' });
-      return false;
-    }
-
-    performRepeaterRequest(message.rawRequest, sender)
-      .then(sendResponse)
-      .catch(error => {
-        console.error('Hera: repeater:send failed:', error);
-        sendResponse({ success: false, error: error.message });
-      });
-    
-    return true;
+    // AUTH-ONLY MODE: Repeater disabled
+    console.warn('Hera: Repeater disabled in auth-only mode');
+    sendResponse({ success: false, error: 'Repeater disabled in auth-only mode' });
+    return false;
   }
 
   /**
