@@ -219,6 +219,26 @@ class SessionSecurityAnalyzer {
       }
     }
 
+    // Check for CSRF token in query parameters (common pattern: f.sid, sid, token, etc.)
+    try {
+      const urlObj = new URL(url);
+      const params = urlObj.searchParams;
+      // Common CSRF query parameter names
+      const csrfParamNames = ['f.sid', 'sid', '_reqid', 'reqid', 'rt', 'token', 'csrf', 'xsrf'];
+      for (const paramName of csrfParamNames) {
+        if (params.has(paramName)) {
+          const value = params.get(paramName);
+          // Check if it looks like a token (not just a number or short string)
+          if (value && (value.length > 8 || paramName.includes('sid'))) {
+            csrfTokenFound = true;
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      // Invalid URL, skip query param check
+    }
+
     // 2. Check for SameSite cookies
     if (cookies) {
       for (const cookie of Object.values(cookies)) {
@@ -599,24 +619,35 @@ class SessionSecurityAnalyzer {
         return false;
       }
 
-      // Verify it's actually OAuth2 by checking for OAuth2 parameters in body
-      if (body && typeof body === 'string') {
-        // OAuth2 token requests contain grant_type
-        const hasGrantType = body.includes('grant_type=');
-
-        // Check for PKCE (code_verifier) or authorization code
-        const hasPKCE = body.includes('code_verifier=');
-        const hasCode = body.includes('code=');
-        const hasRefreshToken = body.includes('refresh_token=');
-        const hasClientCredentials = body.includes('grant_type=client_credentials');
-
-        // If it has grant_type and any OAuth2 flow parameter, it's an OAuth2 token endpoint
-        if (hasGrantType && (hasPKCE || hasCode || hasRefreshToken || hasClientCredentials)) {
-          return true;
-        }
+      // BUGFIX: If URL matches token endpoint pattern, assume it's OAuth2
+      // Even if body is missing/not captured, the URL pattern is strong evidence
+      // Most OAuth2 token endpoints follow standard URL patterns
+      if (!body || typeof body !== 'string' || body.length === 0) {
+        // No body available - rely on URL pattern match
+        // Conservative: Only exempt if URL strongly indicates OAuth2
+        return urlLower.includes('/oauth2/') ||
+               urlLower.includes('/oauth/') ||
+               urlLower.includes('/connect/token');
       }
 
-      return false;
+      // Body is available - verify it's actually OAuth2 by checking parameters
+      // OAuth2 token requests contain grant_type
+      const hasGrantType = body.includes('grant_type=');
+
+      // Check for PKCE (code_verifier) or authorization code
+      const hasPKCE = body.includes('code_verifier=');
+      const hasCode = body.includes('code=');
+      const hasRefreshToken = body.includes('refresh_token=');
+      const hasClientCredentials = body.includes('grant_type=client_credentials');
+
+      // If it has grant_type and any OAuth2 flow parameter, it's an OAuth2 token endpoint
+      if (hasGrantType && (hasPKCE || hasCode || hasRefreshToken || hasClientCredentials)) {
+        return true;
+      }
+
+      // Body present but doesn't match OAuth2 - might be a false positive
+      // Still check URL for strong OAuth2 indicators
+      return urlLower.includes('/oauth2/') || urlLower.includes('/oauth/');
     } catch (error) {
       return false;
     }

@@ -127,6 +127,14 @@ class AuthRiskScorer {
           riskScore: riskScore,
           riskFactors: riskFactors,
           assessment: this.getHstsRiskAssessment(riskScore, riskFactors)
+        },
+        // EVIDENCE: Include response headers to prove HSTS is missing
+        evidence: {
+          url: url,
+          protocol: urlObj.protocol,
+          responseHeaders: headers || [],
+          hstsHeaderPresent: false,
+          verification: `Manual check: https://hstspreload.org/?domain=${urlObj.hostname}`
         }
       };
 
