@@ -20,30 +20,59 @@ class AuthEvidenceManager {
    */
   calculateConfidence(issue, request, parseParams) {
     try {
-      const params = parseParams(request.url);
+      const params = parseParams ? parseParams(request.url) : {};
+      const issueType = issue.type;
+      const severity = issue.severity;
 
-      // High confidence if state is completely missing
-      if (issue.type === 'missingState' && !params.state) {
-        return 'HIGH';
+      // CRITICAL issues with clear evidence = HIGH confidence
+      if (severity === 'CRITICAL') {
+        const highConfidenceCritical = [
+          'MISSING_STATE', 'MISSING_PKCE', 'TOKEN_IN_URL', 'TOKEN_LEAKED_VIA_REFERER',
+          'NO_TLS', 'CREDENTIALS_IN_URL', 'MISSING_HTTPONLY_FLAG',
+          'ALG_NONE_VULNERABILITY', 'ALGORITHM_CONFUSION_RISK',
+          'WEBAUTHN_CHALLENGE_REUSE', 'WEBAUTHN_CROSS_ORIGIN_ATTEMPT',
+          'MISSING_NONCE_IMPLICIT_FLOW', 'MISSING_NONCE_IN_ID_TOKEN',
+          'NONCE_MISMATCH', 'AUDIENCE_MISMATCH', 'DISCOVERY_DOCUMENT_OVER_HTTP',
+          'REDIRECT_URI_CREDENTIAL_INJECTION', 'MISSING_SUB_CLAIM', 'MISSING_ISSUER_CLAIM',
+          'MISSING_AUDIENCE_CLAIM', 'WEBAUTHN_COUNTER_NOT_INCREMENTED'
+        ];
+        if (highConfidenceCritical.includes(issueType)) return 'HIGH';
       }
 
-      // High confidence for known vulnerable patterns
-      if (issue.type === 'clientSecretInURL' || issue.type === 'implicitFlow') {
-        return 'HIGH';
+      // HIGH severity = MEDIUM-HIGH confidence
+      if (severity === 'HIGH') {
+        const highConfidenceHigh = [
+          'WEAK_PKCE_METHOD', 'MISSING_SECURE_FLAG', 'TOKEN_IN_URL_FRAGMENT',
+          'MISSING_AT_HASH', 'MISSING_C_HASH', 'WEAK_USER_VERIFICATION',
+          'WEAK_WEBAUTHN_ALGORITHM', 'WEAK_WEBAUTHN_CHALLENGE',
+          'MISSING_EXPIRATION_CLAIM', 'IAT_IN_FUTURE', 'MISSING_AZP_CLAIM'
+        ];
+        if (highConfidenceHigh.includes(issueType)) return 'HIGH';
+        return 'MEDIUM';
       }
 
-      // Lower confidence if compensating controls exist
-      if (issue.type === 'weakState' && (params.code_challenge || params.nonce)) {
-        return 'LOW';
-      }
+      // Binary checks (present or not) = HIGH confidence
+      const binaryChecks = ['NO_HSTS', 'MISSING_CSRF_PROTECTION'];
+      if (binaryChecks.includes(issueType)) return 'HIGH';
 
-      // Check if this is a known provider (reduces false positive risk)
-      if (this.oauth2Analyzer.isKnownProvider(request.url)) {
-        if (issue.type === 'missingState' && (issue.severity === 'HIGH' || issue.severity === 'CRITICAL')) {
-          return 'MEDIUM'; // Lower confidence for known providers with missing state
+      // OAuth2 specific
+      if (issueType === 'missingState' && !params.state) return 'HIGH';
+      if (issueType === 'clientSecretInURL' || issueType === 'implicitFlow') return 'HIGH';
+      if (issueType === 'DEPRECATED_IMPLICIT_FLOW') return 'HIGH';
+
+      // Lower confidence with compensating controls
+      if (issueType === 'weakState' && (params.code_challenge || params.nonce)) return 'LOW';
+
+      // Known providers
+      if (this.oauth2Analyzer && this.oauth2Analyzer.isKnownProvider(request.url)) {
+        if (issueType === 'missingState' && (severity === 'HIGH' || severity === 'CRITICAL')) {
+          return 'MEDIUM';
         }
       }
 
+      // Default by severity
+      if (severity === 'MEDIUM') return 'MEDIUM';
+      if (severity === 'LOW') return 'LOW';
       return 'MEDIUM';
     } catch (error) {
       console.warn('Error calculating confidence:', error);

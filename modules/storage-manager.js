@@ -240,6 +240,22 @@ export class StorageManager {
 
       console.log(`Storage: ${(bytesInUse / 1024).toFixed(0)}KB / ${(quota / 1024).toFixed(0)}KB (${(usagePercent * 100).toFixed(1)}%)`);
 
+      // AUTO-EXPORT at 80% storage
+      if (usagePercent >= 0.80 && usagePercent < this.QUOTA_WARNING_THRESHOLD) {
+        console.warn(`⚠️ Storage at ${(usagePercent * 100).toFixed(0)}% - triggering auto-export`);
+
+        // Check if we've already shown the export prompt recently (don't spam)
+        const lastExportPrompt = await chrome.storage.session.get(['lastExportPrompt']);
+        const now = Date.now();
+        const oneHour = 60 * 60 * 1000;
+
+        if (!lastExportPrompt.lastExportPrompt || (now - lastExportPrompt.lastExportPrompt) > oneHour) {
+          // Trigger export popup
+          await this._triggerAutoExport(usagePercent);
+          await chrome.storage.session.set({ lastExportPrompt: now });
+        }
+      }
+
       if (usagePercent >= this.QUOTA_WARNING_THRESHOLD) {
         console.warn(`⚠️ Storage quota warning: ${(usagePercent * 100).toFixed(0)}% used`);
 
@@ -260,6 +276,111 @@ export class StorageManager {
       }
     } catch (error) {
       console.error('Failed to check storage quota:', error);
+    }
+  }
+
+  /**
+   * Trigger auto-export popup when storage reaches 80%
+   */
+  async _triggerAutoExport(usagePercent) {
+    try {
+      // Create notification asking user to export
+      await chrome.notifications.create('hera-export-prompt', {
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+        title: 'Hera: Export Your Auth Data',
+        message: `Storage at ${(usagePercent * 100).toFixed(0)}%. Click to export and clear data to prevent loss.`,
+        buttons: [
+          { title: 'Export Now' },
+          { title: 'Remind Me Later' }
+        ],
+        requireInteraction: true,
+        priority: 2
+      });
+
+      // Listen for notification click
+      chrome.notifications.onButtonClicked.addListener(async (notifId, buttonIndex) => {
+        if (notifId === 'hera-export-prompt') {
+          if (buttonIndex === 0) {
+            // Export Now clicked
+            await this.exportAndClearData();
+          }
+          // Clear notification
+          await chrome.notifications.clear(notifId);
+        }
+      });
+
+      // If user clicks notification body, open popup
+      chrome.notifications.onClicked.addListener(async (notifId) => {
+        if (notifId === 'hera-export-prompt') {
+          await this.exportAndClearData();
+          await chrome.notifications.clear(notifId);
+        }
+      });
+
+    } catch (error) {
+      console.error('Failed to trigger auto-export:', error);
+    }
+  }
+
+  /**
+   * Export data and clear storage after download
+   */
+  async exportAndClearData() {
+    try {
+      const result = await chrome.storage.local.get(['heraSessions']);
+      const sessions = result.heraSessions || [];
+
+      if (sessions.length === 0) {
+        console.log('No data to export');
+        return;
+      }
+
+      // Generate filename with timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const filename = `hera-auth-export-${timestamp}.json`;
+
+      // Create export data
+      const exportData = {
+        timestamp: new Date().toISOString(),
+        sessionCount: sessions.length,
+        requests: sessions
+      };
+
+      // Trigger download
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+
+      await chrome.downloads.download({
+        url: url,
+        filename: filename,
+        saveAs: true
+      });
+
+      // Wait for download to complete, then clear
+      chrome.downloads.onChanged.addListener(function clearAfterDownload(delta) {
+        if (delta.state && delta.state.current === 'complete') {
+          // Clear storage after successful download
+          chrome.storage.local.set({ heraSessions: [] }).then(() => {
+            console.log('✅ Data exported and storage cleared');
+
+            // Show success notification
+            chrome.notifications.create({
+              type: 'basic',
+              iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+              title: 'Hera: Export Complete',
+              message: `Exported ${sessions.length} auth sessions. Storage cleared.`,
+              priority: 1
+            });
+          });
+
+          // Remove this listener
+          chrome.downloads.onChanged.removeListener(clearAfterDownload);
+        }
+      });
+
+    } catch (error) {
+      console.error('Failed to export and clear data:', error);
     }
   }
 
