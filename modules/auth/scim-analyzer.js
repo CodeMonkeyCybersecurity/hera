@@ -128,11 +128,11 @@ class SCIMAnalyzer {
   /**
    * Analyze SCIM response for security issues
    */
-  analyzeSCIMResponse(response, url) {
+  analyzeSCIMResponse(response) {
     const issues = [];
     let riskScore = 0;
 
-    const { statusCode, headers, body } = response;
+    const { statusCode, body } = response;
 
     // 1. Check for error information disclosure
     if (statusCode >= 400 && body) {
@@ -186,6 +186,17 @@ class SCIMAnalyzer {
    * Check SCIM authentication method
    */
   _checkAuthentication(headers) {
+    if (!headers) {
+      return {
+        severity: 'CRITICAL',
+        type: 'NO_AUTHENTICATION',
+        message: 'SCIM endpoint accessed without authentication',
+        recommendation: 'Require OAuth2 Bearer tokens for SCIM access',
+        detail: 'No headers present - likely unauthenticated request',
+        cwe: 'CWE-306'
+      };
+    }
+
     const authHeader = headers['authorization'] || headers['Authorization'];
 
     if (!authHeader) {

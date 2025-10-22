@@ -168,12 +168,43 @@ export class ExportManager {
   }
 
   /**
-   * Export as JSON
+   * Export as JSON (ADVERSARIAL FIX: Enhanced with evidence packages)
    */
-  exportAsJSON(data, type, date, time) {
-    const exportData = type === 'current'
-      ? { timestamp: new Date().toISOString(), requests: data }
-      : data;
+  async exportAsJSON(data, type, date, time) {
+    // ADVERSARIAL FIX: Use StorageManager's prepareExportData for enhanced evidence
+    let exportData;
+
+    if (type === 'current') {
+      exportData = {
+        exportMetadata: {
+          version: '1.0.0',
+          timestamp: new Date().toISOString(),
+          requestCount: data.length,
+          redactionApplied: true,
+          evidenceIncluded: true,
+          exportType: 'current_view'
+        },
+        requests: data
+      };
+    } else {
+      // Import storage manager dynamically
+      try {
+        const { storageManager } = await import('../storage-manager.js');
+        exportData = storageManager.prepareExportData(data);
+        exportData.exportMetadata.exportType = 'all_sessions';
+      } catch (e) {
+        console.warn('Could not load storage manager, using basic export:', e);
+        exportData = {
+          exportMetadata: {
+            version: '1.0.0',
+            timestamp: new Date().toISOString(),
+            sessionCount: data.length,
+            exportType: 'all_sessions'
+          },
+          sessions: data
+        };
+      }
+    }
 
     // Safe JSON serialization
     let jsonString;
@@ -195,7 +226,7 @@ export class ExportManager {
 
     chrome.downloads.download({
       url: url,
-      filename: `${date}_${time}_hera-${type}.json`,
+      filename: `${date}_${time}_hera-${type}-evidence.json`,
       saveAs: true
     });
   }

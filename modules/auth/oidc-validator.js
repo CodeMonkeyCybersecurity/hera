@@ -50,11 +50,12 @@ export class OIDCValidator {
 
   /**
    * Validate ID token JWT claims (OIDC-specific)
+   * PHASE 6: Now supports cryptographic at_hash/c_hash validation
    * @param {Object} idToken - Parsed ID token
    * @param {Object} context - Request context (clientId, nonce, etc.)
-   * @returns {Array} Array of security issues
+   * @returns {Promise<Array>} Array of security issues
    */
-  validateIDToken(idToken, context = {}) {
+  async validateIDToken(idToken, context = {}) {
     const issues = [];
 
     if (!idToken || !idToken.header || !idToken.payload) {
@@ -245,6 +246,17 @@ export class OIDCValidator {
           risk: 'Attacker can replace access_token with their own'
         }
       });
+    } else if (context.access_token && payload.at_hash && context.validateCryptographic) {
+      // PHASE 6: Cryptographic validation of at_hash
+      const validation = await this.validateAtHash(
+        payload.at_hash,
+        context.access_token,
+        idToken.header.alg
+      );
+
+      if (!validation.valid && validation.issue) {
+        issues.push(validation.issue);
+      }
     }
 
     // P0-9: Check for c_hash if authorization code present
@@ -263,6 +275,17 @@ export class OIDCValidator {
           risk: 'Attacker can swap authorization code'
         }
       });
+    } else if (context.code && payload.c_hash && context.validateCryptographic) {
+      // PHASE 6: Cryptographic validation of c_hash
+      const validation = await this.validateCHash(
+        payload.c_hash,
+        context.code,
+        idToken.header.alg
+      );
+
+      if (!validation.valid && validation.issue) {
+        issues.push(validation.issue);
+      }
     }
 
     // P0-10: Check acr (Authentication Context Class Reference)
@@ -496,12 +519,147 @@ export class OIDCValidator {
     return null;
   }
 
-  _detectIDTokenAsAccessToken(tokenResponse, requestData) {
+  _detectIDTokenAsAccessToken(tokenResponse) {
     // Heuristic: If we see ID token being sent in Authorization header later
     // This is hard to detect in real-time, but we can flag if access_token missing
     if (!tokenResponse.access_token && tokenResponse.id_token) {
       return true; // Only ID token provided, likely to be misused
     }
     return false;
+  }
+
+  /**
+   * PHASE 6: Cryptographic validation of at_hash
+   * Validates that the at_hash claim in the ID token matches the access token
+   * @param {string} atHash - at_hash claim from ID token
+   * @param {string} accessToken - Access token value
+   * @param {string} algorithm - JWT algorithm (e.g., "RS256")
+   * @returns {Promise<Object>} Validation result
+   */
+  async validateAtHash(atHash, accessToken, algorithm) {
+    try {
+      // Determine hash algorithm from JWT algorithm
+      // RS256/HS256 -> SHA-256, RS384/HS384 -> SHA-384, RS512/HS512 -> SHA-512
+      const hashAlg = algorithm.endsWith('256') ? 'SHA-256' :
+                      algorithm.endsWith('384') ? 'SHA-384' :
+                      algorithm.endsWith('512') ? 'SHA-512' : 'SHA-256';
+
+      // Hash the access token
+      const encoder = new TextEncoder();
+      const data = encoder.encode(accessToken);
+      const hashBuffer = await crypto.subtle.digest(hashAlg, data);
+
+      // Take left-most half of hash
+      const hashArray = new Uint8Array(hashBuffer);
+      const halfLength = Math.floor(hashArray.length / 2);
+      const leftHalf = hashArray.slice(0, halfLength);
+
+      // Base64url encode
+      const base64url = btoa(String.fromCharCode(...leftHalf))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+
+      const valid = base64url === atHash;
+
+      return {
+        valid,
+        issue: !valid ? {
+          severity: 'CRITICAL',
+          type: 'AT_HASH_MISMATCH',
+          message: 'ID token at_hash does not match access_token',
+          cvss: 9.0,
+          cve: 'CWE-345',
+          detail: 'Token substitution attack - access_token was swapped',
+          reference: 'https://openid.net/specs/openid-connect-core-1_0.html#CodeIDToken',
+          evidence: {
+            expectedHash: base64url,
+            actualHash: atHash,
+            algorithm: hashAlg,
+            risk: 'Attacker replaced access_token with their own'
+          }
+        } : null
+      };
+
+    } catch (error) {
+      return {
+        valid: false,
+        issue: {
+          severity: 'MEDIUM',
+          type: 'AT_HASH_VALIDATION_ERROR',
+          message: 'Could not validate at_hash cryptographically',
+          cvss: 5.0,
+          detail: error.message,
+          evidence: { error: error.message }
+        }
+      };
+    }
+  }
+
+  /**
+   * PHASE 6: Cryptographic validation of c_hash
+   * Validates that the c_hash claim in the ID token matches the authorization code
+   * @param {string} cHash - c_hash claim from ID token
+   * @param {string} code - Authorization code value
+   * @param {string} algorithm - JWT algorithm (e.g., "RS256")
+   * @returns {Promise<Object>} Validation result
+   */
+  async validateCHash(cHash, code, algorithm) {
+    try {
+      // Same algorithm as at_hash
+      const hashAlg = algorithm.endsWith('256') ? 'SHA-256' :
+                      algorithm.endsWith('384') ? 'SHA-384' :
+                      algorithm.endsWith('512') ? 'SHA-512' : 'SHA-256';
+
+      // Hash the authorization code
+      const encoder = new TextEncoder();
+      const data = encoder.encode(code);
+      const hashBuffer = await crypto.subtle.digest(hashAlg, data);
+
+      // Take left-most half of hash
+      const hashArray = new Uint8Array(hashBuffer);
+      const halfLength = Math.floor(hashArray.length / 2);
+      const leftHalf = hashArray.slice(0, halfLength);
+
+      // Base64url encode
+      const base64url = btoa(String.fromCharCode(...leftHalf))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+
+      const valid = base64url === cHash;
+
+      return {
+        valid,
+        issue: !valid ? {
+          severity: 'CRITICAL',
+          type: 'C_HASH_MISMATCH',
+          message: 'ID token c_hash does not match authorization code',
+          cvss: 9.0,
+          cve: 'CWE-345',
+          detail: 'Code substitution attack - authorization code was swapped',
+          reference: 'https://openid.net/specs/openid-connect-core-1_0.html#HybridIDToken',
+          evidence: {
+            expectedHash: base64url,
+            actualHash: cHash,
+            algorithm: hashAlg,
+            risk: 'Attacker replaced authorization code with their own'
+          }
+        } : null
+      };
+
+    } catch (error) {
+      return {
+        valid: false,
+        issue: {
+          severity: 'MEDIUM',
+          type: 'C_HASH_VALIDATION_ERROR',
+          message: 'Could not validate c_hash cryptographically',
+          cvss: 5.0,
+          detail: error.message,
+          evidence: { error: error.message }
+        }
+      };
+    }
   }
 }

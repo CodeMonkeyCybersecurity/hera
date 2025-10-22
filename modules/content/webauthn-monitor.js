@@ -411,6 +411,12 @@
 
   function sendToBackground(type, data) {
     try {
+      // Check if chrome.runtime is available (extension context may be invalidated)
+      if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
+        console.warn('Hera: Cannot send WebAuthn detection - extension context unavailable');
+        return;
+      }
+
       chrome.runtime.sendMessage({
         type: 'WEBAUTHN_DETECTION',
         subtype: type,

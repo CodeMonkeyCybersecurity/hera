@@ -2,6 +2,8 @@
 // P0 SECURITY FIX: Includes secret redaction and mutex locking
 // P2-SIXTEENTH-3 FIX: Removed broken encryption imports (secure-storage.js is broken - see background.js:100-105)
 
+import { TokenRedactor } from './auth/token-redactor.js';
+
 export class StorageManager {
   constructor() {
     this.QUOTA_WARNING_THRESHOLD = 0.8; // 80% of quota
@@ -16,6 +18,9 @@ export class StorageManager {
 
     // P0 FIX: Mutex for preventing race conditions
     this.storageLock = Promise.resolve();
+
+    // ADVERSARIAL FIX: Token redaction for exports
+    this.tokenRedactor = new TokenRedactor();
   }
 
   // P0-TENTH-2 FIX: Check per-origin rate limit
@@ -163,7 +168,10 @@ export class StorageManager {
         // Store plaintext timestamp for fast cleanup
         eventData._timestamp = new Date(eventData.timestamp).getTime();
 
-        sessions.push(eventData);
+        // ADVERSARIAL FIX: Apply token redaction before storage
+        const redactedEvent = this._applyTokenRedaction(eventData);
+
+        sessions.push(redactedEvent);
 
         // Enforce max sessions limit
         if (sessions.length > this.MAX_SESSIONS) {
@@ -470,6 +478,83 @@ export class StorageManager {
     } catch (error) {
       console.error('Failed to store security alert:', error);
     }
+  }
+
+  /**
+   * ADVERSARIAL FIX: Apply token redaction to event data
+   * Redacts sensitive tokens while preserving structural information for analysis
+   * @private
+   */
+  _applyTokenRedaction(eventData) {
+    const redacted = { ...eventData };
+
+    // Redact request body if it contains sensitive data
+    if (redacted.requestBody && this.tokenRedactor.containsSensitiveData(redacted.requestBody)) {
+      const redactionResult = this.tokenRedactor.redactRequestBody(redacted.requestBody);
+
+      // Store both redacted body and token metadata
+      redacted.requestBody = redactionResult.redactedBody;
+      redacted._tokenMetadata = {
+        redactionApplied: redactionResult.redactionApplied,
+        tokensFound: redactionResult.tokensFound.map(token => ({
+          name: token.name,
+          riskLevel: token.riskLevel,
+          format: token.format,
+          originalLength: token.originalLength
+        })),
+        originalLength: redactionResult.originalLength,
+        redactedLength: redactionResult.redactedLength
+      };
+    }
+
+    // Redact response body if present (rare, but possible)
+    if (redacted.responseBody && typeof redacted.responseBody === 'object') {
+      const responseRedaction = this.tokenRedactor.redactResponseTokens(redacted.responseBody);
+      if (responseRedaction.tokensFound.length > 0) {
+        redacted.responseBody = responseRedaction.redactedResponse;
+        if (!redacted._tokenMetadata) redacted._tokenMetadata = {};
+        redacted._tokenMetadata.responseTokens = responseRedaction.tokensFound.map(token => ({
+          name: token.name,
+          riskLevel: token.riskLevel,
+          format: token.format,
+          originalLength: token.originalLength
+        }));
+      }
+    }
+
+    return redacted;
+  }
+
+  /**
+   * ADVERSARIAL FIX: Prepare data for export with enhanced evidence
+   * Includes evidence packages and confidence scores
+   * @param {Array} sessions - Sessions to export
+   * @returns {Object} Enhanced export data
+   */
+  prepareExportData(sessions) {
+    return {
+      exportMetadata: {
+        version: '1.0.0',
+        timestamp: new Date().toISOString(),
+        sessionCount: sessions.length,
+        redactionApplied: true,
+        evidenceIncluded: true
+      },
+      sessions: sessions.map(session => ({
+        ...session,
+        _exportNotes: {
+          redactionInfo: session._tokenMetadata ?
+            'Sensitive tokens redacted. See _tokenMetadata for details.' :
+            'No sensitive tokens detected.',
+          evidencePackage: session.metadata?.evidencePackage ?
+            'Response headers and security analysis included in metadata.evidencePackage' :
+            'No evidence package available.',
+          confidenceScore: session.metadata?.authAnalysis?.issues?.length > 0 ?
+            'Confidence scores included in each finding' :
+            'No security findings.'
+        }
+      }))
+    };
   }
 }
 

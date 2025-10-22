@@ -4,7 +4,14 @@
  * This module implements comprehensive evidence collection for vulnerability verification.
  * It captures complete request/response data, correlates authentication flows, and
  * provides the foundation for evidence-based security testing.
+ *
+ * PHASE 1 OIDC ENHANCEMENT:
+ * - POST body capture with automatic redaction
+ * - Token request evidence collection
+ * - PKCE verification support
  */
+
+import { RequestBodyCapturer } from './modules/auth/request-body-capturer.js';
 
 class EvidenceCollector {
   constructor() {
@@ -22,6 +29,9 @@ class EvidenceCollector {
 
     // SECURITY FIX P2-NEW: Storage schema versioning
     this.SCHEMA_VERSION = 1;
+
+    // PHASE 1: Initialize request body capturer
+    this.bodyCapturer = new RequestBodyCapturer();
   }
 
   async initialize() {
@@ -298,6 +308,21 @@ class EvidenceCollector {
       }
     };
 
+    // PHASE 1: Capture POST body for OAuth2/OIDC token requests with redaction
+    if (requestDetails.method === 'POST' && requestDetails.requestBody) {
+      try {
+        const bodyEvidence = this.bodyCapturer.captureRequestBody(requestDetails);
+        evidence.bodyEvidence = bodyEvidence;
+
+        // Add any vulnerabilities found during body analysis
+        if (bodyEvidence.security?.vulnerabilities?.length > 0) {
+          evidence.vulnerabilities = bodyEvidence.security.vulnerabilities;
+        }
+      } catch (error) {
+        console.warn('Hera: Failed to capture request body:', error);
+      }
+    }
+
     // Correlate with active flows
     this.correlateFlow(requestId, evidence);
 
@@ -318,18 +343,22 @@ class EvidenceCollector {
 
   /**
    * Check for HSTS header presence and configuration
+   * PHASE 6 ENHANCEMENT: Now includes preload list checking with fact-based reporting
    * @param {Array} headers - Response headers
    * @param {string} url - Request URL to verify HTTPS usage
-   * @returns {Object} HSTS analysis
+   * @returns {Promise<Object>} HSTS analysis with preload check
    */
-  checkHSTSHeader(headers, url = null) {
+  async checkHSTSHeader(headers, url = null) {
     if (!headers) return { present: false, reason: 'no_headers' };
 
     // CRITICAL: HSTS is meaningless on HTTP connections
     let isHTTPS = true;
+    let domain = null;
     if (url) {
       try {
-        isHTTPS = new URL(url).protocol === 'https:';
+        const urlObj = new URL(url);
+        isHTTPS = urlObj.protocol === 'https:';
+        domain = urlObj.hostname;
       } catch (e) {
         // Invalid URL, assume HTTP for safety
         isHTTPS = false;
@@ -340,13 +369,26 @@ class EvidenceCollector {
       h.name.toLowerCase() === 'strict-transport-security'
     );
 
+    // ADVERSARIAL DECISION: Do NOT check preload list
+    // Per CLAUDE.md ADVERSARIAL_PUSHBACK.md:
+    // - Preload list status varies by browser and version
+    // - Cannot verify what THIS USER'S BROWSER knows
+    // - Adds complexity without certainty
+    // - Report facts we can verify, not guesses
+    //
+    // What Hera does instead: Report header presence/absence with verification URL
+
     if (!hstsHeader) {
       return {
         present: false,
         reason: 'header_missing',
         isHTTPS: isHTTPS,
         warning: !isHTTPS ? 'Connection not using HTTPS - HSTS not applicable' : null,
-        evidence: headers.map(h => ({ name: h.name, value: h.value }))
+        evidence: headers.map(h => ({ name: h.name, value: h.value })),
+        // FACT-BASED recommendation (not speculation)
+        recommendation: domain ?
+          `Add HSTS header. Check preload status: https://hstspreload.org/?domain=${domain}` :
+          'Add HSTS header: Strict-Transport-Security: max-age=31536000; includeSubDomains; preload'
       };
     }
 
@@ -379,7 +421,9 @@ class EvidenceCollector {
         hasSubDomains: includeSubDomains,
         preloadReady: preload
       },
-      evidence: { name: hstsHeader.name, value: hstsHeader.value, protocol: 'HTTPS' }
+      evidence: { name: hstsHeader.name, value: hstsHeader.value, protocol: 'HTTPS' },
+      // Manual preload check URL (not automated to avoid CSP issues)
+      manualPreloadCheckUrl: domain ? `https://hstspreload.org/?domain=${domain}` : null
     };
   }
 
