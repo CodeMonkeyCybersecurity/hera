@@ -9,9 +9,8 @@ export class ViewNavigator {
     this.views = {
       dashboard: 'dashboardPanel',
       requests: 'requestsList',
-      vulnerabilities: 'vulnerabilitiesPanel',
-      ports: 'portsAnalysis',
-      extensions: 'extensionsList'
+      vulnerabilities: 'vulnerabilitiesPanel'
+      // ports and extensions removed - auth-only mode
     };
     this.buttons = {};
     this.panels = {};
@@ -21,22 +20,20 @@ export class ViewNavigator {
    * Initialize view navigator
    */
   initialize() {
-    // Get all buttons
+    // Get all buttons (auth-only mode)
     this.buttons = {
       dashboard: document.getElementById('dashboardBtn'),
       requests: document.getElementById('requestsBtn'),
-      vulnerabilities: document.getElementById('vulnerabilitiesBtn'),
-      ports: document.getElementById('portsBtn'),
-      extensions: document.getElementById('extensionsBtn')
+      vulnerabilities: document.getElementById('vulnerabilitiesBtn')
+      // ports and extensions removed - auth-only mode
     };
 
-    // Get all panels
+    // Get all panels (auth-only mode)
     this.panels = {
       dashboard: document.getElementById('dashboardPanel'),
       requests: document.getElementById('requestsList'),
-      vulnerabilities: document.getElementById('vulnerabilitiesPanel'),
-      ports: document.getElementById('portsAnalysis'),
-      extensions: document.getElementById('extensionsList')
+      vulnerabilities: document.getElementById('vulnerabilitiesPanel')
+      // ports and extensions removed - auth-only mode
     };
 
     // Set up button click handlers

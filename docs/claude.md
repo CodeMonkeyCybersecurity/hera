@@ -25,15 +25,15 @@ in all parts of the browser and web applications accessed via the browser. It is
 - **Prefer editing existing files** over creating new ones
 - **Check conversation history first** - before addressing any topic, review previous conversations to see if we've discussed it and pick up where we most recently left off
 
-### 🚨 CRITICAL POLICY: NO .MD FILES ANYWHERE - INLINE EVERYTHING 🚨
+### 🚨 CRITICAL POLICY: NO .MD FILES - USE TOKENS FOR CODE 🚨
 
-**VIOLATED 5+ TIMES (Reviews 11-14)** - This is now a ZERO-TOLERANCE rule:
+**PRIORITY: CODE CHANGES OVER DOCUMENTATION**
 
 1. **NEVER create .md files during ANY work session**
-   - Agent MUST inline ALL findings directly into source code
-   - Agent MUST NOT create REVIEW-FINDINGS.md, SUMMARY.md, or any documentation files
-   - If tempted to create .md, STOP and inline instead
-   - This applies to: security reviews, integration summaries, testing strategies, ALL documentation
+   - Use tokens for actual code changes, not documentation
+   - Brief inline comments (1-2 lines) are sufficient for notes
+   - If you must document something, use a single inline comment in the relevant file
+   - STOP writing massive summary documents - they waste tokens
 
 2. **Security review process (STRICTLY ENFORCED)**:
    - Find issue → Fix in source code → Add inline comment with P#-REVIEW-N FIX: description
@@ -42,42 +42,25 @@ in all parts of the browser and web applications accessed via the browser. It is
    - NO intermediate .md files AT ANY POINT
    - NO summary documents AT ANY POINT
 
-3. **Documentation hierarchy (REVISED)**:
-   - **Tactical (95% of docs)** = Inline comments in source files
-     * Security fixes: `// P0-FOURTEENTH-1 FIX: XSS via innerHTML`
-     * Review summaries: Add to file header block
-     * Architecture notes: Add to relevant class/function headers
-     * Known limitations: Add to file header "KNOWN LIMITATIONS" section
-   - **Strategic (5% of docs)** = docs/ folder (MINIMAL, PRE-EXISTING ONLY)
-     * README.md (project overview)
-     * ICON_INSTRUCTIONS.md (design assets)
-     * DATA-PERSISTENCE-GUIDE.md (architecture reference)
-     * claude.md (this file - agent instructions)
-   - **Everything else** = INLINE or DELETE
+2. **Token budget priority**:
+   - 80% tokens for code changes
+   - 15% tokens for testing/validation
+   - 5% tokens for brief inline comments
+   - 0% tokens for .md files or summaries
 
-4. **If .md file exists ANYWHERE (root or docs/)**:
-   - Read content
-   - Inline into relevant source files
-   - Delete file same session
-   - Update this policy if pattern repeats
+3. **Documentation rules**:
+   - Inline comments: 1-2 lines max
+   - Security fixes: `// P0-FIX: XSS via innerHTML`
+   - NO separate documentation files
+   - NO summary documents
+   - NO review findings files
 
-5. **Review summary process**:
-   - Add summary to each file's header comment block
-   - Update background.js with cross-cutting findings
-   - NO separate summary document
-   - User can read headers to get full context
+4. **If you create a .md file**:
+   - Task fails immediately
+   - User has to remind you not to waste tokens
+   - Focus on code, not docs
 
-**Enforcement**:
-- Creating ANY .md file = immediate task failure
-- Exception: Updating README.md, ICON_INSTRUCTIONS.md, DATA-PERSISTENCE-GUIDE.md, claude.md ONLY
-- All other .md files in docs/ should be migrated to inline and deleted over time
-
-**Why This Rule Exists**:
-- Documentation gets stale when separated from code
-- Inline comments stay synchronized with changes
-- Reduces cognitive overhead (one place to look)
-- Prevents documentation duplication/drift
-- User explicitly requested this after 14th review
+**Why**: User explicitly requested this - stop writing massive documents, use tokens for actual work
 
 ## Working Relationship
 

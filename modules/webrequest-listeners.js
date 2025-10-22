@@ -354,15 +354,34 @@ export class WebRequestListeners {
             correlationFactors: sessionInfo.correlationFactors
           };
           
-          // Store in persistent storage
-          await this.storageManager.storeAuthEvent({
-            ...requestData,
+          // Store in persistent storage - strip large fields to prevent quota errors
+          const lightRequestData = {
+            id: requestData.id,
+            url: requestData.url,
+            method: requestData.method,
+            statusCode: requestData.statusCode,
+            timestamp: requestData.timestamp,
+            authType: requestData.authType,
             sessionId: sessionInfo.id,
             service: sessionInfo.service,
-            riskScore: this.calculateOverallRiskScore(requestData)
-          });
-          
-          await this.storageManager.updateBadge();
+            riskScore: this.calculateOverallRiskScore(requestData),
+            // Keep only critical metadata
+            metadata: {
+              securityFindings: requestData.metadata?.securityFindings || [],
+              authAnalysis: requestData.metadata?.authAnalysis ? {
+                protocol: requestData.metadata.authAnalysis.protocol,
+                riskScore: requestData.metadata.authAnalysis.riskScore,
+                issues: requestData.metadata.authAnalysis.issues
+              } : null
+            }
+          };
+
+          try {
+            await this.storageManager.storeAuthEvent(lightRequestData);
+            await this.storageManager.updateBadge();
+          } catch (err) {
+            console.warn('Storage error (quota exceeded):', err.message);
+          }
         }
       },
       { urls: ["<all_urls>"] }

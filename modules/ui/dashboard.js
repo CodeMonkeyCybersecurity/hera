@@ -37,17 +37,73 @@ export class HeraDashboard {
     try {
       this.showLoadingState();
 
-      const response = await chrome.runtime.sendMessage({ type: 'GET_SITE_ANALYSIS' });
+      // Get stored requests directly from storage
+      const result = await chrome.storage.local.get(['authRequests']);
+      const requests = result.authRequests || {};
+      const requestArray = Object.values(requests);
 
-      if (response && response.success && response.analysis) {
-        this.renderDashboard(response.analysis);
-      } else {
+      if (requestArray.length === 0) {
         this.showEmptyState();
+        return;
       }
+
+      // Aggregate findings from all requests
+      const allFindings = [];
+      requestArray.forEach(req => {
+        if (req.metadata?.securityFindings) {
+          allFindings.push(...req.metadata.securityFindings);
+        }
+        if (req.metadata?.evidencePackage?.evidence?.cookieFlags?.vulnerabilities) {
+          allFindings.push(...req.metadata.evidencePackage.evidence.cookieFlags.vulnerabilities);
+        }
+        if (req.metadata?.authAnalysis?.issues) {
+          allFindings.push(...req.metadata.authAnalysis.issues);
+        }
+      });
+
+      // Create analysis object
+      const analysis = {
+        url: requestArray[0]?.url || 'Unknown',
+        timestamp: Date.now(),
+        findings: allFindings,
+        score: this.calculateScore(allFindings)
+      };
+
+      this.renderDashboard(analysis);
     } catch (error) {
       console.error('Failed to load dashboard:', error);
       this.showErrorState(error?.message || String(error) || 'Unknown error');
     }
+  }
+
+  calculateScore(findings) {
+    const critical = findings.filter(f => f.severity === 'CRITICAL' || f.severity === 'critical').length;
+    const high = findings.filter(f => f.severity === 'HIGH' || f.severity === 'high').length;
+    const medium = findings.filter(f => f.severity === 'MEDIUM' || f.severity === 'medium').length;
+    const low = findings.filter(f => f.severity === 'LOW' || f.severity === 'low').length;
+
+    const score = 100 - (critical * 25) - (high * 10) - (medium * 5) - (low * 2);
+    const totalFindings = critical + high + medium + low;
+
+    let grade = 'A';
+    let riskLevel = 'low';
+    if (score < 50) { grade = 'F'; riskLevel = 'critical'; }
+    else if (score < 60) { grade = 'D'; riskLevel = 'high'; }
+    else if (score < 70) { grade = 'C'; riskLevel = 'medium'; }
+    else if (score < 80) { grade = 'B'; riskLevel = 'low'; }
+
+    return {
+      grade,
+      overallScore: Math.max(0, score),
+      riskLevel,
+      summary: `Found ${totalFindings} security ${totalFindings === 1 ? 'issue' : 'issues'}`,
+      totalFindings,
+      criticalIssues: critical,
+      highIssues: high,
+      mediumIssues: medium,
+      lowIssues: low,
+      categoryScores: {}
+    };
   }
 
   /**
@@ -80,27 +136,132 @@ export class HeraDashboard {
   /**
    * Render dashboard
    */
-  renderDashboard(analysis) {
-    const { url, findings, score, timestamp } = analysis;
+  async renderDashboard(analysis) {
+    // Safety checks for undefined data
+    if (!analysis || !analysis.score) {
+      this.showEmptyState();
+      return;
+    }
+
+    const { url, findings = [], score, timestamp } = analysis;
 
     DOMSecurity.replaceChildren(this.dashboardContent);
 
     const container = document.createElement('div');
     container.className = 'hera-dashboard';
 
-    // Score card
+    // Score card (always visible)
     const scoreCard = this.createScoreCard(score);
     container.appendChild(scoreCard);
 
-    // Category breakdown
-    const categoryBreakdown = this.createCategoryBreakdown(score, findings);
-    container.appendChild(categoryBreakdown);
+    // Findings list (grouped by severity)
+    const findingsSection = this.createFindingsSection(findings);
+    container.appendChild(findingsSection);
+
+    // Recent requests (expandable) - async
+    const requestsSection = await this.createRecentRequestsSection();
+    container.appendChild(requestsSection);
 
     // Site info
     const siteInfo = this.createSiteInfo(url, timestamp);
     container.appendChild(siteInfo);
 
     this.dashboardContent.appendChild(container);
+  }
+
+  createFindingsSection(findings) {
+    const section = document.createElement('div');
+    section.className = 'dashboard-section findings-section';
+
+    const header = document.createElement('div');
+    header.className = 'section-header';
+    header.innerHTML = `<h3>🔍 Security Findings (${findings.length})</h3>`;
+    header.style.cursor = 'pointer';
+    section.appendChild(header);
+
+    const content = document.createElement('div');
+    content.className = 'section-content';
+    content.style.display = 'block'; // Start expanded
+
+    // Group by severity
+    const bySeverity = { CRITICAL: [], HIGH: [], MEDIUM: [], LOW: [] };
+    findings.forEach(f => {
+      const sev = (f.severity || 'LOW').toUpperCase();
+      if (bySeverity[sev]) bySeverity[sev].push(f);
+    });
+
+    // Create expandable groups
+    ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].forEach(severity => {
+      if (bySeverity[severity].length === 0) return;
+
+      const group = document.createElement('details');
+      group.className = `finding-group ${severity.toLowerCase()}`;
+      group.open = severity === 'CRITICAL' || severity === 'HIGH';
+
+      const summary = document.createElement('summary');
+      summary.textContent = `${severity}: ${bySeverity[severity].length} issues`;
+      group.appendChild(summary);
+
+      const list = document.createElement('ul');
+      bySeverity[severity].forEach(finding => {
+        const item = document.createElement('li');
+        item.textContent = finding.message || finding.type || 'Unknown issue';
+        if (finding.cookie) item.textContent += ` (${finding.cookie})`;
+        list.appendChild(item);
+      });
+      group.appendChild(list);
+      content.appendChild(group);
+    });
+
+    section.appendChild(content);
+
+    // Toggle visibility
+    header.addEventListener('click', () => {
+      content.style.display = content.style.display === 'none' ? 'block' : 'none';
+    });
+
+    return section;
+  }
+
+  async createRecentRequestsSection() {
+    const section = document.createElement('div');
+    section.className = 'dashboard-section requests-section';
+
+    const header = document.createElement('div');
+    header.className = 'section-header';
+    header.innerHTML = '<h3>📡 Recent Auth Requests</h3>';
+    header.style.cursor = 'pointer';
+    section.appendChild(header);
+
+    const content = document.createElement('div');
+    content.className = 'section-content';
+    content.style.display = 'none'; // Start collapsed
+
+    // Get recent requests from storage
+    const result = await chrome.storage.local.get(['authRequests']);
+    const requests = Object.values(result.authRequests || {}).slice(0, 10);
+
+    if (requests.length > 0) {
+      const list = document.createElement('ul');
+      requests.forEach(req => {
+        const item = document.createElement('li');
+        const url = new URL(req.url);
+        item.textContent = `${req.method} ${url.pathname} (${req.statusCode})`;
+        list.appendChild(item);
+      });
+      content.appendChild(list);
+    } else {
+      content.textContent = 'No recent requests';
+    }
+
+    section.appendChild(content);
+
+    // Toggle visibility
+    header.addEventListener('click', () => {
+      content.style.display = content.style.display === 'none' ? 'block' : 'none';
+    });
+
+    return section;
   }
 
   /**
@@ -110,35 +271,45 @@ export class HeraDashboard {
     const card = document.createElement('div');
     card.className = 'dashboard-score-card';
 
+    // Safety: Provide defaults for missing score properties
+    const grade = score.grade || 'N/A';
+    const overallScore = score.overallScore !== undefined ? score.overallScore : 0;
+    const riskLevel = score.riskLevel || 'unknown';
+    const summaryText = score.summary || 'No analysis data available';
+    const totalFindings = score.totalFindings || 0;
+    const criticalIssues = score.criticalIssues || 0;
+    const highIssues = score.highIssues || 0;
+    const mediumIssues = score.mediumIssues || 0;
+    const lowIssues = score.lowIssues || 0;
+
     // Grade display
     const gradeDisplay = document.createElement('div');
-    gradeDisplay.className = `dashboard-grade grade-${score.grade.charAt(0).toLowerCase()}`;
+    gradeDisplay.className = `dashboard-grade grade-${grade.charAt(0).toLowerCase()}`;
 
-    const gradeValue = DOMSecurity.createSafeElement('div', score.grade, { className: 'grade-value' });
-    const gradeLabel = DOMSecurity.createSafeElement('div', `${Math.round(score.overallScore)}/100`, { className: 'grade-label' });
+    const gradeValue = DOMSecurity.createSafeElement('div', grade, { className: 'grade-value' });
+    const gradeLabel = DOMSecurity.createSafeElement('div', `${Math.round(overallScore)}/100`, { className: 'grade-label' });
 
     gradeDisplay.appendChild(gradeValue);
     gradeDisplay.appendChild(gradeLabel);
 
     // Risk badge
-    const riskLevel = score.riskLevel || 'unknown';
     const riskBadge = DOMSecurity.createSafeElement('div', riskLevel.toUpperCase(), {
       className: `dashboard-risk-badge risk-${riskLevel}`
     });
 
     // Summary
-    const summary = DOMSecurity.createSafeElement('p', score.summary, { className: 'dashboard-summary' });
+    const summaryEl = DOMSecurity.createSafeElement('p', summaryText, { className: 'dashboard-summary' });
 
     // Stats
     const stats = document.createElement('div');
     stats.className = 'dashboard-stats';
 
     const statItems = [
-      { label: 'Total Issues', value: score.totalFindings, className: 'total' },
-      { label: 'Critical', value: score.criticalIssues, className: 'critical' },
-      { label: 'High', value: score.highIssues, className: 'high' },
-      { label: 'Medium', value: score.mediumIssues, className: 'medium' },
-      { label: 'Low', value: score.lowIssues, className: 'low' }
+      { label: 'Total Issues', value: totalFindings, className: 'total' },
+      { label: 'Critical', value: criticalIssues, className: 'critical' },
+      { label: 'High', value: highIssues, className: 'high' },
+      { label: 'Medium', value: mediumIssues, className: 'medium' },
+      { label: 'Low', value: lowIssues, className: 'low' }
     ];
 
     statItems.forEach(item => {
@@ -155,7 +326,7 @@ export class HeraDashboard {
 
     card.appendChild(gradeDisplay);
     card.appendChild(riskBadge);
-    card.appendChild(summary);
+    card.appendChild(summaryEl);
     card.appendChild(stats);
 
     return card;
@@ -175,7 +346,8 @@ export class HeraDashboard {
     categories.className = 'dashboard-categories';
 
     // Sort categories by finding count
-    const sortedCategories = Object.entries(score.categoryScores)
+    const categoryScores = score.categoryScores || {};
+    const sortedCategories = Object.entries(categoryScores)
       .sort((a, b) => b[1].findingCount - a[1].findingCount);
 
     for (const [categoryName, categoryData] of sortedCategories) {
