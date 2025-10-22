@@ -190,6 +190,13 @@ class SessionSecurityAnalyzer {
       return null;
     }
 
+    // BUGFIX: Exempt OAuth2 token endpoints from CSRF checks
+    // OAuth2 token endpoints use PKCE (code_verifier) or client authentication, not CSRF tokens
+    // Reference: RFC 6749, RFC 7636 (PKCE)
+    if (this._isOAuth2TokenEndpoint(url, body)) {
+      return null; // OAuth2 token exchange protected by PKCE or client secret
+    }
+
     const origin = new URL(url).origin;
     let csrfTokenFound = false;
     let sameSiteCookiePresent = false;
@@ -569,6 +576,50 @@ class SessionSecurityAnalyzer {
       return cookie.value; // Return first session cookie value
     }
     return null;
+  }
+
+  /**
+   * Check if request is to an OAuth2 token endpoint
+   * These endpoints are protected by PKCE (code_verifier) or client authentication, not CSRF tokens
+   * @param {string} url - Request URL
+   * @param {string} body - Request body
+   * @returns {boolean} True if OAuth2 token endpoint
+   */
+  _isOAuth2TokenEndpoint(url, body) {
+    try {
+      const urlLower = url.toLowerCase();
+
+      // Check if URL matches OAuth2 token endpoint pattern
+      const isTokenEndpoint = urlLower.includes('/token') ||
+                              urlLower.includes('/oauth2/v2.0/token') ||
+                              urlLower.includes('/oauth/token') ||
+                              urlLower.includes('/connect/token');
+
+      if (!isTokenEndpoint) {
+        return false;
+      }
+
+      // Verify it's actually OAuth2 by checking for OAuth2 parameters in body
+      if (body && typeof body === 'string') {
+        // OAuth2 token requests contain grant_type
+        const hasGrantType = body.includes('grant_type=');
+
+        // Check for PKCE (code_verifier) or authorization code
+        const hasPKCE = body.includes('code_verifier=');
+        const hasCode = body.includes('code=');
+        const hasRefreshToken = body.includes('refresh_token=');
+        const hasClientCredentials = body.includes('grant_type=client_credentials');
+
+        // If it has grant_type and any OAuth2 flow parameter, it's an OAuth2 token endpoint
+        if (hasGrantType && (hasPKCE || hasCode || hasRefreshToken || hasClientCredentials)) {
+          return true;
+        }
+      }
+
+      return false;
+    } catch (error) {
+      return false;
+    }
   }
 }
 

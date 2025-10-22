@@ -269,6 +269,12 @@ class HeraAuthProtocolDetector {
       issues.push(credentialIssue);
     }
 
+    // P0: Check for token leakage in URL or Referer header
+    const tokenLeakageIssues = this._detectTokenLeakage(url, headers);
+    if (tokenLeakageIssues.length > 0) {
+      issues.push(...tokenLeakageIssues);
+    }
+
     // Check for missing security headers with risk-based assessment
     const hstsIssue = this.riskScorer.assessHstsRisk(url, headers, request);
     if (hstsIssue) {
@@ -468,6 +474,112 @@ class HeraAuthProtocolDetector {
    */
   generateVerificationId() {
     return this.evidenceManager.generateVerificationId();
+  }
+
+  /**
+   * P0: Detect token leakage in URLs or Referer headers
+   * Tokens should NEVER be in URL parameters (logged, cached, leaked via Referer)
+   * @param {string} url - Request URL
+   * @param {Object} headers - Request headers
+   * @returns {Array} Issues found
+   */
+  _detectTokenLeakage(url, headers) {
+    const issues = [];
+
+    try {
+      const urlObj = new URL(url);
+      const params = urlObj.searchParams;
+
+      // Token patterns that should NEVER be in URLs
+      const tokenParams = ['access_token', 'token', 'bearer', 'jwt', 'id_token', 'refresh_token'];
+
+      for (const param of tokenParams) {
+        if (params.has(param)) {
+          const tokenValue = params.get(param);
+          issues.push({
+            type: 'TOKEN_IN_URL',
+            protocol: 'Universal',
+            severity: 'CRITICAL',
+            message: `${param} found in URL parameters - major security risk`,
+            recommendation: 'Never pass tokens in URL. Use Authorization header or secure cookies',
+            cvss: 9.0,
+            cve: 'OAuth 2.0 Security BCP Section 4.3.2',
+            detail: 'Tokens in URLs are logged by servers, proxies, and browsers. Leaked via Referer headers.',
+            evidence: {
+              param,
+              url: url.replace(tokenValue, '***REDACTED***'),
+              risk: 'Token will appear in server logs, browser history, and Referer headers',
+              leakageVectors: [
+                'Server access logs',
+                'Proxy logs',
+                'Browser history',
+                'Referer headers to third parties',
+                'Browser extensions',
+                'Shoulder surfing'
+              ]
+            },
+            reference: 'https://datatracker.ietf.org/doc/html/draft-ietf-oauth-security-topics#section-4.3.2'
+          });
+        }
+      }
+
+      // Check for tokens in URL fragment (implicit flow - deprecated but still used)
+      if (urlObj.hash) {
+        const hashParams = new URLSearchParams(urlObj.hash.substring(1));
+        for (const param of tokenParams) {
+          if (hashParams.has(param)) {
+            issues.push({
+              type: 'TOKEN_IN_URL_FRAGMENT',
+              protocol: 'Universal',
+              severity: 'HIGH',
+              message: `${param} found in URL fragment (implicit flow)`,
+              recommendation: 'Migrate to Authorization Code flow with PKCE',
+              cvss: 7.5,
+              detail: 'Implicit flow is deprecated. Tokens in URL fragments exposed to JavaScript.',
+              evidence: {
+                param,
+                fragment: urlObj.hash.replace(hashParams.get(param), '***REDACTED***'),
+                risk: 'Fragment accessible to JavaScript, vulnerable to XSS'
+              },
+              reference: 'https://oauth.net/2/grant-types/implicit/'
+            });
+          }
+        }
+      }
+
+      // Check Referer header for token leakage
+      const referer = headers['referer'] || headers['Referer'];
+      if (referer) {
+        const refererUrl = new URL(referer);
+        const refererParams = refererUrl.searchParams;
+
+        for (const param of tokenParams) {
+          if (refererParams.has(param)) {
+            issues.push({
+              type: 'TOKEN_LEAKED_VIA_REFERER',
+              protocol: 'Universal',
+              severity: 'CRITICAL',
+              message: `Token detected in Referer header - leaked from previous page`,
+              recommendation: 'Never put tokens in URLs. This token has already leaked.',
+              cvss: 9.5,
+              detail: 'Token from previous page leaked via Referer header to current site',
+              evidence: {
+                param,
+                referer: referer.replace(refererParams.get(param), '***REDACTED***'),
+                currentUrl: url,
+                risk: 'Token now known to third party server'
+              },
+              reference: 'https://owasp.org/www-community/vulnerabilities/Information_exposure_through_query_strings_in_url'
+            });
+          }
+        }
+      }
+
+    } catch (error) {
+      // URL parsing error, skip
+    }
+
+    return issues;
   }
 }
 

@@ -69,6 +69,12 @@ class AuthRiskScorer {
         return null;
       }
 
+      // BUGFIX: Skip domains on HSTS preload list (protected at browser level)
+      // These major domains have HSTS preloaded in browsers, making header optional
+      if (this._isHSTSPreloaded(urlObj.hostname)) {
+        return null; // Preloaded - HSTS enforced by browser even without header
+      }
+
       // Risk factors assessment
       let riskScore = 10; // Baseline score for all HTTPS endpoints
       let riskFactors = ['HTTPS endpoint (baseline HSTS consideration)'];
@@ -409,6 +415,67 @@ class AuthRiskScorer {
       return header?.value;
     }
     return headers[name] || headers[name.toLowerCase()];
+  }
+
+  /**
+   * Check if domain is on HSTS preload list
+   * These domains have HSTS enforced by browsers even without the header
+   * @param {string} hostname - Domain to check
+   * @returns {boolean} True if preloaded
+   */
+  _isHSTSPreloaded(hostname) {
+    // Major domains on HSTS preload list
+    // Source: https://hstspreload.org/
+    const preloadedDomains = [
+      // Microsoft
+      'microsoft.com',
+      'microsoftonline.com',
+      'login.microsoftonline.com',
+      'windows.net',
+      'azure.com',
+      'office.com',
+      'live.com',
+      'outlook.com',
+
+      // Google
+      'google.com',
+      'googleapis.com',
+      'gmail.com',
+      'youtube.com',
+      'gstatic.com',
+
+      // Meta/Facebook
+      'facebook.com',
+      'fbcdn.net',
+      'instagram.com',
+      'whatsapp.com',
+
+      // Other major platforms
+      'github.com',
+      'github.io',
+      'twitter.com',
+      'linkedin.com',
+      'amazon.com',
+      'amazonaws.com',
+      'cloudflare.com',
+      'apple.com',
+      'icloud.com',
+
+      // Financial
+      'paypal.com',
+      'stripe.com',
+      'visa.com',
+      'mastercard.com'
+    ];
+
+    // Check if hostname matches or is subdomain of preloaded domain
+    for (const domain of preloadedDomains) {
+      if (hostname === domain || hostname.endsWith('.' + domain)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 }
 
