@@ -84,6 +84,37 @@ export class StorageManager {
         const result = await chrome.storage.local.get({ heraSessions: [] });
         let sessions = result.heraSessions;
 
+        // DEDUPLICATION: Check if we already have this exact finding (within 5 seconds)
+        const fiveSecondsAgo = Date.now() - 5000;
+        const isDuplicate = sessions.some(s => {
+          // Same URL
+          if (s.url !== eventData.url) return false;
+
+          // Same method
+          if (s.method !== eventData.method) return false;
+
+          // Within 5 seconds
+          const sessionTime = s._timestamp || new Date(s.timestamp).getTime();
+          if (sessionTime < fiveSecondsAgo) return false;
+
+          // Same issue types (compare sorted arrays)
+          const existingIssues = (s.metadata?.authAnalysis?.issues || [])
+            .map(i => i.type)
+            .sort()
+            .join(',');
+          const newIssues = (eventData.metadata?.authAnalysis?.issues || [])
+            .map(i => i.type)
+            .sort()
+            .join(',');
+
+          return existingIssues === newIssues;
+        });
+
+        if (isDuplicate) {
+          console.log(`Hera: Skipping duplicate finding: ${eventData.url}`);
+          return;
+        }
+
         // P0-TENTH-2 FIX: Count sessions per origin
         const originSessions = sessions.filter(s => {
           try {
