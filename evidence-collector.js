@@ -151,14 +151,12 @@ class EvidenceCollector {
         return; // Don't write this sync, wait for next sync with smaller data
       }
 
-      // CRITICAL FIX P0: Use chrome.storage.local (survives browser restart)
-      // SECURITY FIX P2-NEW: Store schema version
-      await chrome.storage.local.set({
-        heraEvidence: evidence,
-        heraEvidenceSchemaVersion: this.SCHEMA_VERSION
-      });
+      // DISABLED: Evidence cache causes 8MB storage bloat, nothing uses it
+      // All actual auth data goes to heraSessions (managed by storage-manager.js)
+      // This was designed for "evidence-based verification" but UI only reads heraSessions
 
-      console.log(`Hera: Evidence synced (${this._responseCache.size} responses, ${this._timeline.length} events, ${evidenceMB} MB)`);
+      // Don't sync to chrome.storage - saves 8MB+ of quota
+      console.log(`Hera: Evidence cache (in-memory only, NOT synced): ${this._responseCache.size} responses, ${this._timeline.length} events, ${evidenceMB} MB`);
 
     } catch (error) {
       if (error.message?.includes('QUOTA')) {

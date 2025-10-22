@@ -35,6 +35,16 @@
       "all_frames": false,
       "world": "ISOLATED",
       "comment": "Non-auth detectors disabled: subdomain-impersonation, dark-pattern, phishing, privacy-violation, risk-scoring"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": [
+        "modules/content/webauthn-monitor.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false,
+      "world": "MAIN",
+      "comment": "WebAuthn API interceptor - must run in MAIN world to intercept navigator.credentials"
     }
   ],
   "action": {

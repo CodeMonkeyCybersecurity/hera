@@ -137,7 +137,7 @@ class JWTValidator {
   }
 
   /**
-   * Validate JWT algorithm
+   * Validate JWT algorithm - enhanced with confusion attack detection
    */
   _validateAlgorithm(header) {
     const alg = header.alg;
@@ -147,30 +147,87 @@ class JWTValidator {
         severity: 'CRITICAL',
         type: 'MISSING_ALGORITHM',
         message: 'JWT header missing "alg" field',
-        recommendation: 'Reject token - algorithm must be specified'
+        recommendation: 'Reject token - algorithm must be specified',
+        cvss: 10.0
       };
     }
 
-    // CRITICAL: alg:none vulnerability
-    if (alg.toLowerCase() === 'none') {
+    // CRITICAL: alg:none vulnerability (check all bypass variants)
+    const algLower = alg.toLowerCase().trim();
+    const algNormalized = alg.replace(/\u0000/g, '').trim(); // Remove null bytes
+
+    if (algLower === 'none' || algNormalized.toLowerCase() === 'none' || alg === '') {
       return {
         severity: 'CRITICAL',
         type: 'ALG_NONE_VULNERABILITY',
-        message: 'JWT uses "alg:none" - signature bypass attack possible',
-        recommendation: 'Reject immediately - this allows forging arbitrary tokens',
+        message: `JWT uses "alg:${alg}" - signature verification bypassed`,
+        recommendation: 'Reject immediately - allows forging arbitrary tokens',
         cve: 'CVE-2015-9235',
-        references: ['https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/']
+        cvss: 10.0,
+        references: ['https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/'],
+        evidence: {
+          algorithm: alg,
+          bypass: alg !== algLower ? 'Case variation bypass attempt' :
+                  alg !== algNormalized ? 'Null byte injection attempt' :
+                  alg === '' ? 'Empty algorithm' : 'Standard alg:none',
+          risk: 'Complete authentication bypass'
+        }
       };
     }
 
-    // HIGH: Weak symmetric algorithm
+    // CRITICAL: Algorithm confusion attack detection
+    // Detect HS* algorithms that could be confused with RS*
+    if (this._isHMACAlgorithm(alg)) {
+      return {
+        severity: 'CRITICAL',
+        type: 'ALGORITHM_CONFUSION_RISK',
+        message: `JWT uses symmetric algorithm ${alg} - vulnerable to algorithm confusion attack`,
+        recommendation: 'Server may accept this token signed with public key as HMAC secret. Use RS256/ES256 only.',
+        cvss: 9.0,
+        evidence: {
+          algorithm: alg,
+          risk: 'Attacker can sign token with public key if server switches RS→HS',
+          attack: 'Change alg to HS256, sign with stolen public key'
+        }
+      };
+    }
+
+    // HIGH: Weak symmetric algorithm (if not already caught above)
     if (alg === 'HS256') {
       return {
         severity: 'HIGH',
         type: 'WEAK_SYMMETRIC_ALGORITHM',
         message: 'JWT uses HS256 with potentially weak shared secret',
         recommendation: 'If secret is <32 bytes, vulnerable to brute force. Prefer RS512 or ES256.',
+        cvss: 7.0,
         detail: 'HS256 security depends entirely on secret strength. Many implementations use weak secrets.'
+      };
+    }
+
+    // Check for mixed algorithm environments (confusion risk)
+    if (this._isAsymmetricAlgorithm(alg) && header.kid) {
+      // If we see RS*/ES* with a key ID, server might accept both symmetric and asymmetric
+      // This is a configuration risk, not necessarily a vulnerability in this token
+      return {
+        severity: 'MEDIUM',
+        type: 'ALGORITHM_CONFUSION_CONFIGURATION',
+        message: 'JWT uses asymmetric algorithm but configuration may allow symmetric',
+        recommendation: 'Ensure server strictly enforces expected algorithm type',
+        cvss: 5.0,
+        evidence: { algorithm: alg, kid: header.kid }
+      };
+    }
+
+    // MEDIUM: Check token size for DoS
+    if (header.zip || header.cty) {
+      return {
+        severity: 'MEDIUM',
+        type: 'JWT_COMPRESSION_DETECTED',
+        message: 'JWT uses compression or nested encoding',
+        recommendation: 'Check for excessive size - may be CVE-2025-27144 memory exhaustion attack',
+        cvss: 5.0,
+        cve: 'CVE-2025-27144',
+        evidence: { zip: header.zip, cty: header.cty }
       };
     }
 
@@ -181,11 +238,28 @@ class JWTValidator {
         type: 'WEAK_ALGORITHM',
         message: `JWT algorithm "${alg}" not recommended`,
         recommendation: `Prefer modern algorithms: ${this.strongAlgorithms.join(', ')}`,
+        cvss: 4.0,
         detail: 'Older algorithms may have known weaknesses or performance issues'
       };
     }
 
     return null;
+  }
+
+  /**
+   * Check if algorithm is HMAC (symmetric)
+   */
+  _isHMACAlgorithm(alg) {
+    return alg && alg.toUpperCase().startsWith('HS');
+  }
+
+  /**
+   * Check if algorithm is asymmetric
+   */
+  _isAsymmetricAlgorithm(alg) {
+    if (!alg) return false;
+    const upper = alg.toUpperCase();
+    return upper.startsWith('RS') || upper.startsWith('ES') || upper.startsWith('PS');
   }
 
   /**

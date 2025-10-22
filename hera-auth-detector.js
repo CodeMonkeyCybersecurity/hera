@@ -11,6 +11,7 @@ import { AuthRiskScorer } from './modules/auth/auth-risk-scorer.js';
 import { AuthEvidenceManager } from './modules/auth/auth-evidence-manager.js';
 import { HeraAuthIssueVisualizer } from './modules/auth/auth-issue-visualizer.js';
 import { OAuth2VerificationEngine, HSTSVerificationEngine } from './oauth2-verification-engine.js';
+import { OIDCValidator } from './modules/auth/oidc-validator.js';
 
 /**
  * Main coordinator class for authentication protocol detection and analysis
@@ -25,6 +26,7 @@ class HeraAuthProtocolDetector {
     this.issueDb = new AuthIssueDatabase();
     this.issueDatabase = this.issueDb.database; // Backward compatibility
     this.oauth2Analyzer = new OAuth2Analyzer();
+    this.oidcValidator = new OIDCValidator();
     this.flowTracker = new OAuth2FlowTracker();
     this.utilFunctions = new AuthUtilFunctions();
     this.riskScorer = new AuthRiskScorer(this.utilFunctions);
@@ -40,7 +42,7 @@ class HeraAuthProtocolDetector {
   /**
    * Analyze a request for authentication security issues
    */
-  analyzeRequest(request) {
+  analyzeRequest(request, response = null) {
     const issues = [];
 
     // Detect protocol type
@@ -54,6 +56,16 @@ class HeraAuthProtocolDetector {
     // Run protocol-specific checks
     if (this.issueDatabase[protocol]) {
       issues.push(...this.checkProtocolSecurity(protocol, request));
+    }
+
+    // P0 OIDC Detection: Check for OIDC-specific vulnerabilities
+    try {
+      const oidcIssues = this.oidcValidator.analyzeOIDCRequest(request, response || {});
+      if (oidcIssues && oidcIssues.length > 0) {
+        issues.push(...oidcIssues);
+      }
+    } catch (error) {
+      console.warn('OIDC validation error:', error);
     }
 
     // Run universal checks

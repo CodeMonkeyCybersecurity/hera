@@ -795,7 +795,8 @@ export class MessageRouter {
       'ANALYSIS_ERROR',
       'GET_SITE_ANALYSIS',
       'TRIGGER_ANALYSIS',
-      'INJECT_RESPONSE_INTERCEPTOR'
+      'INJECT_RESPONSE_INTERCEPTOR',
+      'WEBAUTHN_DETECTION'
     ];
 
     if (!isAuthorizedSender && message.type && !contentScriptAllowedTypes.includes(message.type)) {
@@ -823,6 +824,10 @@ export class MessageRouter {
         console.error('Analysis error received:', message.error);
         sendResponse({ success: false, error: message.error });
         return false;
+
+      case 'WEBAUTHN_DETECTION':
+        console.log('MessageRouter: Calling handleWebAuthnDetection');
+        return this.handleWebAuthnDetection(message, sendResponse);
 
       default:
         console.log('Hera: Unhandled type-based message:', message.type);
@@ -915,6 +920,65 @@ export class MessageRouter {
 
     this.errorCollector.clearErrors();
     sendResponse({ success: true });
+    return false;
+  }
+
+  /**
+   * Handle WebAuthn detection from content script
+   * P0 WebAuthn: Store WebAuthn vulnerabilities detected by content script
+   */
+  async handleWebAuthnDetection(message, sendResponse) {
+    console.log('Hera: WebAuthn detection received:', {
+      subtype: message.subtype,
+      url: message.url,
+      issueCount: message.issues?.length || 0
+    });
+
+    if (!message.issues || message.issues.length === 0) {
+      sendResponse({ success: true, stored: false });
+      return false;
+    }
+
+    try {
+      // Create a session entry for WebAuthn findings
+      const sessionData = {
+        id: this.generateSessionId(),
+        url: message.url,
+        method: 'WebAuthn',
+        type: 'webauthn',
+        authType: 'WebAuthn/FIDO2',
+        timestamp: new Date(message.timestamp).toISOString(),
+        statusCode: 200,
+        requestHeaders: [],
+        responseHeaders: [],
+        requestBody: null,
+        responseBody: null,
+        metadata: {
+          authAnalysis: {
+            protocol: 'WebAuthn',
+            issues: message.issues,
+            riskScore: this.heraAuthDetector.calculateRiskScore(message.issues),
+            riskCategory: this.heraAuthDetector.getRiskCategory(
+              this.heraAuthDetector.calculateRiskScore(message.issues)
+            ),
+            webauthnSubtype: message.subtype,
+            webauthnOptions: message.options || {}
+          }
+        }
+      };
+
+      // Store the WebAuthn session
+      await this.storageManager.storeAuthEvent(sessionData);
+      await this.updateBadge();
+
+      console.log('Hera: WebAuthn findings stored successfully');
+      sendResponse({ success: true, stored: true, issueCount: message.issues.length });
+
+    } catch (error) {
+      console.error('Hera: Error storing WebAuthn detection:', error);
+      sendResponse({ success: false, error: error.message });
+    }
+
     return false;
   }
 }

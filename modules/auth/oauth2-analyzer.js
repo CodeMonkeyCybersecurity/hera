@@ -73,29 +73,102 @@ class OAuth2Analyzer {
   }
 
   /**
-   * Analyze the quality of a state parameter
+   * Analyze the quality of a state parameter - enhanced with CSRF detection
    */
   analyzeStateQuality(state) {
+    const issues = [];
+
+    if (!state) {
+      return {
+        exists: false,
+        length: 0,
+        entropyPerChar: 0,
+        totalEntropy: 0,
+        appearsRandom: false,
+        risk: 'CRITICAL',
+        issues: [{
+          severity: 'CRITICAL',
+          type: 'MISSING_STATE',
+          message: 'OAuth2 request missing state parameter - vulnerable to CSRF',
+          recommendation: 'Always include cryptographically random state parameter (minimum 128 bits)',
+          cvss: 8.8,
+          detail: 'Missing state allows CSRF attacks where attacker links victim account to attacker OAuth account',
+          reference: 'https://oauth.net/2/state/',
+          evidence: { risk: 'Complete CSRF protection bypass' }
+        }]
+      };
+    }
+
     const entropyData = this.calculateEntropy(state);
 
     const analysis = {
-      exists: !!state,
-      length: state ? state.length : 0,
+      exists: true,
+      length: state.length,
       entropyPerChar: entropyData.perChar,
       totalEntropy: entropyData.total,
       appearsRandom: false,
-      risk: 'HIGH'
+      risk: 'HIGH',
+      issues: []
     };
 
+    // Check for weak patterns
+    if (/^(test|demo|example|123|abc|xyz)$/i.test(state)) {
+      issues.push({
+        severity: 'CRITICAL',
+        type: 'PREDICTABLE_STATE',
+        message: 'State parameter uses predictable value',
+        recommendation: 'Use cryptographically random state (crypto.getRandomValues)',
+        cvss: 8.0,
+        evidence: { state, pattern: 'common test value' }
+      });
+      analysis.risk = 'CRITICAL';
+    }
+
+    // Check minimum length (OWASP recommends 32+ characters)
+    if (state.length < 16) {
+      issues.push({
+        severity: 'HIGH',
+        type: 'WEAK_STATE',
+        message: `State parameter too short (${state.length} chars, minimum 16 recommended)`,
+        recommendation: 'Use minimum 128 bits (16 bytes) of entropy',
+        cvss: 7.0,
+        evidence: { length: state.length, minRecommended: 16 }
+      });
+      analysis.risk = 'HIGH';
+    }
+
     // Check entropy per character (should be >= 3 bits for decent randomness)
-    // AND total entropy (should be >= 64 bits minimum for security)
+    // AND total entropy (should be >= 128 bits minimum for security)
     if (entropyData.perChar >= 3 && entropyData.total >= 128) {
       analysis.appearsRandom = true;
       analysis.risk = 'LOW';
     } else if (entropyData.perChar >= 2 && entropyData.total >= 64) {
       analysis.risk = 'MEDIUM';
+      issues.push({
+        severity: 'MEDIUM',
+        type: 'LOW_ENTROPY_STATE',
+        message: `State parameter has low entropy (${Math.round(entropyData.total)} bits, minimum 128 recommended)`,
+        recommendation: 'Increase state randomness to minimum 128 bits',
+        cvss: 5.0,
+        evidence: {
+          totalEntropy: Math.round(entropyData.total),
+          entropyPerChar: entropyData.perChar.toFixed(2),
+          minRecommended: 128
+        }
+      });
+    } else {
+      analysis.risk = 'HIGH';
+      issues.push({
+        severity: 'HIGH',
+        type: 'INSUFFICIENT_ENTROPY_STATE',
+        message: `State parameter has insufficient entropy (${Math.round(entropyData.total)} bits)`,
+        recommendation: 'State must have minimum 128 bits of entropy to prevent guessing attacks',
+        cvss: 7.0,
+        evidence: { totalEntropy: Math.round(entropyData.total) }
+      });
     }
 
+    analysis.issues = issues;
     return analysis;
   }
 
@@ -131,17 +204,23 @@ class OAuth2Analyzer {
       });
       riskScore += 20;
     } else {
-      // Check for deprecated grant types
+      // Check for deprecated grant types (implicit flow)
       if (grantInfo.deprecated) {
         issues.push({
-          severity: 'HIGH',
-          type: 'DEPRECATED_GRANT_TYPE',
-          message: `Using deprecated grant type: ${grantType}`,
-          recommendation: 'Migrate to authorization_code flow with PKCE',
-          detail: 'Implicit flow is deprecated due to token leakage risks',
-          reference: 'https://oauth.net/2/grant-types/implicit/'
+          severity: 'CRITICAL',
+          type: 'DEPRECATED_IMPLICIT_FLOW',
+          message: `Using deprecated implicit flow (response_type=${params.response_type})`,
+          recommendation: 'Migrate to Authorization Code flow with PKCE - implicit flow officially deprecated',
+          detail: 'Implicit flow returns tokens in URL fragment - exposed in browser history, logs, and referrer headers',
+          cvss: 8.8,
+          cve: 'OAuth 2.0 Security BCP Section 2.1.2',
+          reference: 'https://datatracker.ietf.org/doc/html/draft-ietf-oauth-security-topics#section-2.1.2',
+          evidence: {
+            responseType: params.response_type,
+            risk: 'Tokens leaked via URL fragment to browser history and server logs'
+          }
         });
-        riskScore += 40;
+        riskScore += 50;
       }
 
       // Check for insecure grant types
@@ -157,17 +236,38 @@ class OAuth2Analyzer {
         riskScore += 60;
       }
 
-      // Check for PKCE requirement
+      // Check for PKCE requirement (MANDATORY for public clients)
       if (grantInfo.pkceRequired && !params.code_challenge) {
         issues.push({
-          severity: 'HIGH',
+          severity: 'CRITICAL',
           type: 'MISSING_PKCE',
-          message: 'Authorization code flow without PKCE',
-          recommendation: 'Implement PKCE (RFC 7636) for authorization code flow',
+          message: 'Authorization code flow missing PKCE - vulnerable to code interception',
+          recommendation: 'Implement PKCE (RFC 7636) - MANDATORY for public clients (SPA, mobile)',
           detail: 'PKCE prevents authorization code interception attacks',
-          reference: 'https://oauth.net/2/pkce/'
+          cvss: 8.0,
+          cve: 'OAuth 2.0 Security BCP',
+          reference: 'https://oauth.net/2/pkce/',
+          evidence: {
+            responseType: params.response_type,
+            risk: 'Attacker can intercept code from redirect and exchange for tokens'
+          }
         });
-        riskScore += 35;
+        riskScore += 50;
+      } else if (params.code_challenge) {
+        // PKCE present - check for weak method
+        const method = params.code_challenge_method || 'plain';
+        if (method === 'plain') {
+          issues.push({
+            severity: 'HIGH',
+            type: 'WEAK_PKCE_METHOD',
+            message: 'PKCE using "plain" method instead of S256',
+            recommendation: 'Use code_challenge_method=S256 for SHA-256 hashing',
+            cvss: 6.0,
+            detail: 'Plain method provides weaker protection than S256',
+            evidence: { method, challenge: params.code_challenge }
+          });
+          riskScore += 25;
+        }
       }
     }
 
@@ -238,10 +338,41 @@ class OAuth2Analyzer {
           message: 'Redirect URI contains wildcards or path traversal',
           recommendation: 'Use exact redirect URI matching',
           detail: 'Wildcard redirect URIs enable open redirect attacks',
+          cvss: 9.0,
           cwe: 'CWE-601',
           redirectUri
         });
         riskScore += 80;
+      }
+
+      // 4. Check for credential injection attack (https://evil.com@good.com)
+      if (uri.username || uri.password || redirectUri.includes('@')) {
+        issues.push({
+          severity: 'CRITICAL',
+          type: 'REDIRECT_URI_CREDENTIAL_INJECTION',
+          message: 'Redirect URI contains @ symbol - possible credential injection attack',
+          recommendation: 'Reject URIs with @ symbol (except mailto: scheme)',
+          detail: 'Attacker can use https://evil.com@good.com to redirect to evil.com',
+          cvss: 9.0,
+          cwe: 'CWE-601',
+          evidence: { redirectUri, parsed: uri.href }
+        });
+        riskScore += 80;
+      }
+
+      // 5. Check for subdomain confusion (https://good.com.evil.com)
+      const parts = uri.hostname.split('.');
+      if (parts.length > 3) {
+        issues.push({
+          severity: 'HIGH',
+          type: 'REDIRECT_URI_SUBDOMAIN_CONFUSION',
+          message: `Redirect URI has ${parts.length} domain parts - possible subdomain spoofing`,
+          recommendation: 'Validate that registered domain matches expected',
+          detail: 'Attacker can register good.com.evil.com to confuse users',
+          cvss: 7.0,
+          evidence: { hostname: uri.hostname, parts }
+        });
+        riskScore += 35;
       }
 
       // 4. Check for open redirect patterns

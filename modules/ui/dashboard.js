@@ -37,36 +37,36 @@ export class HeraDashboard {
     try {
       this.showLoadingState();
 
-      // Get stored requests directly from storage
-      const result = await chrome.storage.local.get(['authRequests']);
-      const requests = result.authRequests || {};
-      const requestArray = Object.values(requests);
+      // Get stored sessions from correct storage key
+      const result = await chrome.storage.local.get(['heraSessions']);
+      const sessions = result.heraSessions || [];
 
-      if (requestArray.length === 0) {
+      if (sessions.length === 0) {
         this.showEmptyState();
         return;
       }
 
-      // Aggregate findings from all requests
+      // Aggregate findings from all sessions
       const allFindings = [];
-      requestArray.forEach(req => {
-        if (req.metadata?.securityFindings) {
-          allFindings.push(...req.metadata.securityFindings);
+      sessions.forEach(session => {
+        if (session.metadata?.securityFindings) {
+          allFindings.push(...session.metadata.securityFindings);
         }
-        if (req.metadata?.evidencePackage?.evidence?.cookieFlags?.vulnerabilities) {
-          allFindings.push(...req.metadata.evidencePackage.evidence.cookieFlags.vulnerabilities);
+        if (session.metadata?.evidencePackage?.evidence?.cookieFlags?.vulnerabilities) {
+          allFindings.push(...session.metadata.evidencePackage.evidence.cookieFlags.vulnerabilities);
         }
-        if (req.metadata?.authAnalysis?.issues) {
-          allFindings.push(...req.metadata.authAnalysis.issues);
+        if (session.metadata?.authAnalysis?.issues) {
+          allFindings.push(...session.metadata.authAnalysis.issues);
         }
       });
 
-      // Create analysis object
+      // Create analysis object with sessions
       const analysis = {
-        url: requestArray[0]?.url || 'Unknown',
+        url: sessions[0]?.url || 'Unknown',
         timestamp: Date.now(),
         findings: allFindings,
-        score: this.calculateScore(allFindings)
+        score: this.calculateScore(allFindings),
+        sessions: sessions
       };
 
       this.renderDashboard(analysis);
@@ -134,7 +134,7 @@ export class HeraDashboard {
   }
 
   /**
-   * Render dashboard
+   * Render dashboard - simplified single-pane view
    */
   async renderDashboard(analysis) {
     // Safety checks for undefined data
@@ -143,84 +143,314 @@ export class HeraDashboard {
       return;
     }
 
-    const { url, findings = [], score, timestamp } = analysis;
+    const { url, findings = [], score, timestamp, sessions = [] } = analysis;
 
     DOMSecurity.replaceChildren(this.dashboardContent);
 
     const container = document.createElement('div');
-    container.className = 'hera-dashboard';
+    container.className = 'hera-dashboard-simple';
 
-    // Score card (always visible)
-    const scoreCard = this.createScoreCard(score);
+    // Score card (prominent, always visible)
+    const scoreCard = this.createSimpleScoreCard(score);
     container.appendChild(scoreCard);
 
-    // Findings list (grouped by severity)
-    const findingsSection = this.createFindingsSection(findings);
-    container.appendChild(findingsSection);
-
-    // Recent requests (expandable) - async
-    const requestsSection = await this.createRecentRequestsSection();
+    // Recent requests WITH their findings (merged view)
+    const requestsSection = await this.createMergedRequestsList(sessions);
     container.appendChild(requestsSection);
-
-    // Site info
-    const siteInfo = this.createSiteInfo(url, timestamp);
-    container.appendChild(siteInfo);
 
     this.dashboardContent.appendChild(container);
   }
 
-  createFindingsSection(findings) {
-    const section = document.createElement('div');
-    section.className = 'dashboard-section findings-section';
+  /**
+   * Create simplified score card - clean, prominent display
+   */
+  createSimpleScoreCard(score) {
+    const card = document.createElement('div');
+    card.className = 'score-card-simple';
 
-    const header = document.createElement('div');
-    header.className = 'section-header';
-    header.innerHTML = `<h3>🔍 Security Findings (${findings.length})</h3>`;
-    header.style.cursor = 'pointer';
+    const grade = score.grade || 'N/A';
+    const overallScore = score.overallScore !== undefined ? score.overallScore : 0;
+    const riskLevel = score.riskLevel || 'unknown';
+
+    // Large grade display
+    const gradeDisplay = document.createElement('div');
+    gradeDisplay.className = 'grade-display';
+    gradeDisplay.innerHTML = `
+      <div class="grade-letter grade-${grade.toLowerCase()}">${grade}</div>
+      <div class="grade-score">${Math.round(overallScore)}/100</div>
+      <div class="grade-risk risk-${riskLevel}">${riskLevel.toUpperCase()}</div>
+    `;
+    card.appendChild(gradeDisplay);
+
+    // Issue counts
+    const counts = document.createElement('div');
+    counts.className = 'issue-counts';
+    counts.innerHTML = `
+      <span class="count critical">${score.criticalIssues || 0} Critical</span>
+      <span class="count high">${score.highIssues || 0} High</span>
+      <span class="count medium">${score.mediumIssues || 0} Medium</span>
+      <span class="count low">${score.lowIssues || 0} Low</span>
+    `;
+    card.appendChild(counts);
+
+    return card;
+  }
+
+  /**
+   * Create simplified findings list - flat, no collapsing
+   */
+  createSimpleFindingsList(findings) {
+    const section = document.createElement('div');
+    section.className = 'findings-simple';
+
+    const header = document.createElement('h3');
+    header.textContent = `Security Issues (${findings.length})`;
     section.appendChild(header);
 
-    const content = document.createElement('div');
-    content.className = 'section-content';
-    content.style.display = 'block'; // Start expanded
-
-    // Group by severity
-    const bySeverity = { CRITICAL: [], HIGH: [], MEDIUM: [], LOW: [] };
-    findings.forEach(f => {
-      const sev = (f.severity || 'LOW').toUpperCase();
-      if (bySeverity[sev]) bySeverity[sev].push(f);
+    // Sort by severity
+    const severityOrder = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+    const sorted = findings.sort((a, b) => {
+      const aSev = (a.severity || 'LOW').toUpperCase();
+      const bSev = (b.severity || 'LOW').toUpperCase();
+      return (severityOrder[aSev] || 99) - (severityOrder[bSev] || 99);
     });
 
-    // Create expandable groups
-    ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].forEach(severity => {
-      if (bySeverity[severity].length === 0) return;
+    const list = document.createElement('div');
+    list.className = 'findings-list-simple';
 
-      const group = document.createElement('details');
-      group.className = `finding-group ${severity.toLowerCase()}`;
-      group.open = severity === 'CRITICAL' || severity === 'HIGH';
+    sorted.forEach(finding => {
+      const item = document.createElement('div');
+      const severity = (finding.severity || 'LOW').toUpperCase();
+      item.className = `finding-item-simple severity-${severity.toLowerCase()}`;
 
-      const summary = document.createElement('summary');
-      summary.textContent = `${severity}: ${bySeverity[severity].length} issues`;
-      group.appendChild(summary);
+      const badge = document.createElement('span');
+      badge.className = 'severity-badge';
+      badge.textContent = severity;
 
-      const list = document.createElement('ul');
-      bySeverity[severity].forEach(finding => {
-        const item = document.createElement('li');
-        item.textContent = finding.message || finding.type || 'Unknown issue';
-        if (finding.cookie) item.textContent += ` (${finding.cookie})`;
-        list.appendChild(item);
-      });
-      group.appendChild(list);
-      content.appendChild(group);
+      const message = document.createElement('span');
+      message.className = 'finding-message';
+      message.textContent = finding.message || finding.type || 'Unknown issue';
+      if (finding.cookie) message.textContent += ` (${finding.cookie})`;
+
+      item.appendChild(badge);
+      item.appendChild(message);
+      list.appendChild(item);
     });
 
-    section.appendChild(content);
-
-    // Toggle visibility
-    header.addEventListener('click', () => {
-      content.style.display = content.style.display === 'none' ? 'block' : 'none';
-    });
-
+    section.appendChild(list);
     return section;
+  }
+
+  /**
+   * Create merged requests list - shows each request with its vulnerabilities and JSON
+   */
+  async createMergedRequestsList(sessions) {
+    const section = document.createElement('div');
+    section.className = 'requests-merged';
+
+    const header = document.createElement('h3');
+    header.textContent = 'Authentication Requests & Vulnerabilities';
+    section.appendChild(header);
+
+    const recentSessions = sessions.slice(-10).reverse();
+
+    if (recentSessions.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-message';
+      empty.textContent = 'No requests captured yet';
+      section.appendChild(empty);
+      return section;
+    }
+
+    const list = document.createElement('div');
+    list.className = 'requests-list-merged';
+
+    recentSessions.forEach(session => {
+      const requestCard = document.createElement('details');
+      requestCard.className = 'request-card';
+
+      // Get findings for this session
+      const findings = [];
+      if (session.metadata?.securityFindings) {
+        findings.push(...session.metadata.securityFindings);
+      }
+      if (session.metadata?.authAnalysis?.issues) {
+        findings.push(...session.metadata.authAnalysis.issues);
+      }
+
+      const maxSeverity = this.getMaxSeverity(findings);
+      if (maxSeverity) {
+        requestCard.classList.add(`has-${maxSeverity.toLowerCase()}`);
+      }
+
+      // Summary (collapsed view)
+      const summary = document.createElement('summary');
+      summary.className = 'request-summary';
+
+      const url = new URL(session.url);
+
+      const hostname = document.createElement('span');
+      hostname.className = 'request-hostname';
+      hostname.textContent = url.hostname;
+
+      const method = document.createElement('span');
+      method.className = 'request-method';
+      method.textContent = session.method || 'GET';
+
+      const path = document.createElement('span');
+      path.className = 'request-path';
+      path.textContent = url.pathname;
+
+      const status = document.createElement('span');
+      status.className = `request-status status-${Math.floor((session.statusCode || 200) / 100)}xx`;
+      status.textContent = session.statusCode || '200';
+
+      const vulnBadge = document.createElement('span');
+      vulnBadge.className = 'vuln-badge';
+      if (findings.length > 0) {
+        vulnBadge.textContent = `${findings.length} issue${findings.length > 1 ? 's' : ''}`;
+        vulnBadge.classList.add(`severity-${maxSeverity.toLowerCase()}`);
+      } else {
+        vulnBadge.textContent = 'Secure';
+        vulnBadge.classList.add('severity-secure');
+      }
+
+      summary.appendChild(hostname);
+      summary.appendChild(method);
+      summary.appendChild(path);
+      summary.appendChild(status);
+      summary.appendChild(vulnBadge);
+      requestCard.appendChild(summary);
+
+      // Expanded content
+      const content = document.createElement('div');
+      content.className = 'request-content';
+
+      // Findings list
+      if (findings.length > 0) {
+        const findingsDiv = document.createElement('div');
+        findingsDiv.className = 'request-findings';
+
+        const findingsHeader = document.createElement('h4');
+        findingsHeader.textContent = 'Security Issues';
+        findingsDiv.appendChild(findingsHeader);
+
+        findings.forEach(finding => {
+          const findingItem = document.createElement('div');
+          const severity = (finding.severity || 'LOW').toUpperCase();
+          findingItem.className = `finding-item severity-${severity.toLowerCase()}`;
+
+          const badge = document.createElement('span');
+          badge.className = 'severity-badge';
+          badge.textContent = severity;
+
+          const message = document.createElement('span');
+          message.className = 'finding-message';
+          message.textContent = finding.message || finding.type || 'Unknown issue';
+
+          findingItem.appendChild(badge);
+          findingItem.appendChild(message);
+          findingsDiv.appendChild(findingItem);
+        });
+
+        content.appendChild(findingsDiv);
+      }
+
+      // JSON viewer with highlighted issues
+      const jsonDiv = document.createElement('div');
+      jsonDiv.className = 'request-json';
+
+      const jsonHeader = document.createElement('h4');
+      jsonHeader.textContent = 'Request Data';
+      jsonDiv.appendChild(jsonHeader);
+
+      const jsonPre = document.createElement('pre');
+      jsonPre.className = 'json-viewer';
+      jsonPre.innerHTML = this.renderHighlightedJSON(session, findings);
+      jsonDiv.appendChild(jsonPre);
+
+      content.appendChild(jsonDiv);
+      requestCard.appendChild(content);
+
+      list.appendChild(requestCard);
+    });
+
+    section.appendChild(list);
+    return section;
+  }
+
+  /**
+   * Get maximum severity from findings
+   */
+  getMaxSeverity(findings) {
+    if (!findings || findings.length === 0) return null;
+    const severities = findings.map(f => (f.severity || 'LOW').toUpperCase());
+    if (severities.includes('CRITICAL')) return 'CRITICAL';
+    if (severities.includes('HIGH')) return 'HIGH';
+    if (severities.includes('MEDIUM')) return 'MEDIUM';
+    if (severities.includes('LOW')) return 'LOW';
+    return 'LOW';
+  }
+
+  /**
+   * Render JSON with highlighted vulnerabilities
+   */
+  renderHighlightedJSON(session, findings) {
+    const json = JSON.stringify(session, null, 2);
+    let highlighted = this.escapeHtml(json);
+
+    // Highlight fields mentioned in findings
+    findings.forEach(finding => {
+      const message = finding.message || '';
+
+      // Extract field names from messages (e.g., "Missing HSTS header", "Session-Id cookie")
+      if (message.includes('HSTS')) {
+        highlighted = highlighted.replace(
+          /"strict-transport-security":\s*null/g,
+          '<span class="json-error">"strict-transport-security": null</span> <span class="json-annotation">← Missing HSTS</span>'
+        );
+      }
+
+      if (finding.cookie) {
+        const cookieRegex = new RegExp(`"${finding.cookie}"`, 'g');
+        highlighted = highlighted.replace(
+          cookieRegex,
+          `<span class="json-highlight">"${finding.cookie}"</span> <span class="json-annotation">← ${message}</span>`
+        );
+      }
+
+      if (message.includes('SameSite')) {
+        highlighted = highlighted.replace(
+          /"sameSite":\s*"None"/g,
+          '<span class="json-error">"sameSite": "None"</span> <span class="json-annotation">← Vulnerable to CSRF</span>'
+        );
+      }
+
+      if (message.includes('HttpOnly')) {
+        highlighted = highlighted.replace(
+          /"httpOnly":\s*false/g,
+          '<span class="json-error">"httpOnly": false</span> <span class="json-annotation">← Accessible via JavaScript</span>'
+        );
+      }
+
+      if (message.includes('Secure')) {
+        highlighted = highlighted.replace(
+          /"secure":\s*false/g,
+          '<span class="json-error">"secure": false</span> <span class="json-annotation">← Can be sent over HTTP</span>'
+        );
+      }
+    });
+
+    return highlighted;
+  }
+
+  /**
+   * Escape HTML for safe rendering
+   */
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 
   async createRecentRequestsSection() {

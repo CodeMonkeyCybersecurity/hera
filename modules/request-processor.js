@@ -130,6 +130,28 @@ export class RequestProcessor {
           );
         }
 
+        // P0 OIDC: Re-analyze with response data for OIDC token validation
+        try {
+          const responseData = {
+            body: data.body,
+            status: data.statusCode,
+            headers: data.responseHeaders || {}
+          };
+          const oidcAnalysis = this.heraAuthDetector.analyzeRequest(requestData, responseData);
+          if (oidcAnalysis.issues && oidcAnalysis.issues.length > 0) {
+            // Merge new OIDC issues with existing analysis
+            requestData.metadata.authAnalysis.issues.push(...oidcAnalysis.issues);
+            requestData.metadata.authAnalysis.riskScore = this.heraAuthDetector.calculateRiskScore(
+              requestData.metadata.authAnalysis.issues
+            );
+            requestData.metadata.authAnalysis.riskCategory = this.heraAuthDetector.getRiskCategory(
+              requestData.metadata.authAnalysis.riskScore
+            );
+          }
+        } catch (oidcError) {
+          console.warn('OIDC response analysis error:', oidcError);
+        }
+
         // Save to storage
         await storageManager.storeSession(requestData);
         await storageManager.updateBadge();
