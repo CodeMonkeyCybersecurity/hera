@@ -12,7 +12,7 @@ export class StorageManager {
 
     // P0-TENTH-2 FIX: Per-origin limits
     this.MAX_SESSIONS_PER_ORIGIN = 50; // Max 50 sessions per domain
-    this.STORAGE_RATE_LIMIT = 10; // Max 10 stores per minute per origin
+    this.STORAGE_RATE_LIMIT = 50; // Max 50 stores per minute per origin (increased for WebAuthn flows)
     this.originStorageCount = new Map(); // Track stores per origin
     this.originLastReset = new Map(); // Track rate limit windows
 

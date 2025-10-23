@@ -967,15 +967,20 @@ export class MessageRouter {
         }
       };
 
-      // Store the WebAuthn session
-      await this.storageManager.storeAuthEvent(sessionData);
-      await this.updateBadge();
-
-      console.log('Hera: WebAuthn findings stored successfully');
-      sendResponse({ success: true, stored: true, issueCount: message.issues.length });
+      // Store the WebAuthn session (non-blocking - don't fail if storage rate limited)
+      try {
+        await this.storageManager.storeAuthEvent(sessionData);
+        await this.updateBadge();
+        console.log('Hera: WebAuthn findings stored successfully');
+        sendResponse({ success: true, stored: true, issueCount: message.issues.length });
+      } catch (storageError) {
+        console.warn('Hera: WebAuthn storage failed (rate limited), but findings captured:', storageError.message);
+        // CRITICAL: Still report success to avoid blocking user's login
+        sendResponse({ success: true, stored: false, issueCount: message.issues.length, storageError: storageError.message });
+      }
 
     } catch (error) {
-      console.error('Hera: Error storing WebAuthn detection:', error);
+      console.error('Hera: Error processing WebAuthn detection:', error);
       sendResponse({ success: false, error: error.message });
     }
 
