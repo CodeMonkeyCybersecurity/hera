@@ -98,15 +98,18 @@ class SCIMAnalyzer {
     }
 
     // 5. Check for rate limiting headers
-    if (!headers['x-ratelimit-limit'] && !headers['retry-after']) {
-      issues.push({
-        severity: 'MEDIUM',
-        type: 'NO_RATE_LIMITING',
-        message: 'SCIM endpoint missing rate limiting headers',
-        recommendation: 'Implement rate limiting to prevent abuse',
-        detail: 'Bulk operations without rate limiting enable DoS attacks'
-      });
-      riskScore += 20;
+    // BUGFIX: Check if headers exist before accessing properties
+    if (headers && typeof headers === 'object') {
+      if (!headers['x-ratelimit-limit'] && !headers['retry-after']) {
+        issues.push({
+          severity: 'MEDIUM',
+          type: 'NO_RATE_LIMITING',
+          message: 'SCIM endpoint missing rate limiting headers',
+          recommendation: 'Implement rate limiting to prevent abuse',
+          detail: 'Bulk operations without rate limiting enable DoS attacks'
+        });
+        riskScore += 20;
+      }
     }
 
     // 6. Check for schema validation

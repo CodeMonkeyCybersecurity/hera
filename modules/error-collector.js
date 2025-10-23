@@ -54,13 +54,17 @@ class ErrorCollector {
     const originalLog = console.log;
 
     console.error = (...args) => {
-      this.logError({
-        type: 'CONSOLE_ERROR',
-        message: args.map(a => String(a)).join(' '),
-        args: args,
-        stack: new Error().stack,
-        timestamp: new Date().toISOString()
-      });
+      // BUGFIX: Don't log storage quota errors to prevent infinite loop
+      const message = args.map(a => String(a)).join(' ');
+      if (!message.includes('Storage rate limit') && !message.includes('QUOTA_BYTES')) {
+        this.logError({
+          type: 'CONSOLE_ERROR',
+          message: message,
+          args: args,
+          stack: new Error().stack,
+          timestamp: new Date().toISOString()
+        });
+      }
       originalError.apply(console, args);
     };
 
@@ -226,7 +230,9 @@ class ErrorCollector {
         }
       });
     } catch (err) {
-      // Ignore storage errors to prevent infinite loop
+      // BUGFIX: Silently ignore storage errors to prevent infinite loop
+      // Don't log this error as it would cause recursion
+      // Storage quota errors are expected when monitoring high-traffic sites
     }
   }
 
