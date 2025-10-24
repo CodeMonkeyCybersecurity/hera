@@ -5,6 +5,16 @@
 (function() {
   'use strict';
 
+  // BUGFIX: Check if Credential Management API is available
+  // navigator.credentials may be undefined on:
+  // - HTTP pages (requires HTTPS)
+  // - Pages without Credential Management API support
+  // - Older browsers
+  if (typeof navigator === 'undefined' || !navigator.credentials || typeof navigator.credentials.create !== 'function') {
+    console.log('Hera: WebAuthn monitor not loaded - Credential Management API not available');
+    return; // Exit early, don't try to intercept
+  }
+
   // Track challenges to detect reuse
   const challengeHistory = new Map(); // challenge hash -> { timestamp, count }
   const credentialCounters = new Map(); // credentialId -> lastCounter
