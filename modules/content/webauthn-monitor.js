@@ -10,18 +10,31 @@
   // - HTTP pages (requires HTTPS)
   // - Pages without Credential Management API support
   // - Older browsers
+  // - Extension internal pages (chrome-extension://)
   if (typeof navigator === 'undefined' || !navigator.credentials || typeof navigator.credentials.create !== 'function') {
     console.log('Hera: WebAuthn monitor not loaded - Credential Management API not available');
     return; // Exit early, don't try to intercept
+  }
+
+  // DEFENSIVE: Don't run on extension internal pages
+  // WebAuthn should only run on web pages (http/https)
+  if (typeof window !== 'undefined' && window.location &&
+      (window.location.protocol === 'chrome-extension:' ||
+       window.location.protocol === 'chrome:' ||
+       window.location.protocol === 'about:')) {
+    console.log('Hera: WebAuthn monitor not loaded - extension/internal page');
+    return; // Exit early
   }
 
   // Track challenges to detect reuse
   const challengeHistory = new Map(); // challenge hash -> { timestamp, count }
   const credentialCounters = new Map(); // credentialId -> lastCounter
 
-  // Store original methods
-  const originalCreate = navigator.credentials.create;
-  const originalGet = navigator.credentials.get;
+  // Store original methods with .bind() for safer context preservation
+  // PATTERN BORROWED FROM: Password managers (1Password, Bitwarden)
+  // BENEFIT: Ensures correct context without manual .call() every time
+  const originalCreate = navigator.credentials.create.bind(navigator.credentials);
+  const originalGet = navigator.credentials.get.bind(navigator.credentials);
 
   /**
    * Analyze WebAuthn registration (create) options for security issues
@@ -420,22 +433,39 @@
   }
 
   function sendToBackground(type, data) {
+    // DEFENSIVE ERROR HANDLING: Fail silently to never break WebAuthn
+    // PATTERN BORROWED FROM: Password manager extensions (must not block auth)
     try {
       // Check if chrome.runtime is available (extension context may be invalidated)
-      if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
-        console.warn('Hera: Cannot send WebAuthn detection - extension context unavailable');
+      // This can happen when:
+      // - Extension is reloaded/updated while page is open
+      // - Page navigates during WebAuthn ceremony
+      // - Extension is disabled
+      if (typeof chrome === 'undefined' || !chrome?.runtime?.sendMessage) {
+        // Fail silently - don't log in production to avoid console spam
+        const DEBUG = false;
+        if (DEBUG) console.warn('Hera: Extension context unavailable, cannot send WebAuthn detection');
         return;
       }
 
+      // Send message and catch any runtime errors
       chrome.runtime.sendMessage({
         type: 'WEBAUTHN_DETECTION',
         subtype: type,
         url: window.location.href,
         timestamp: Date.now(),
         ...data
+      }).catch((error) => {
+        // Message failed (receiver not found, quota exceeded, etc.)
+        // Fail silently - critical that we don't throw and break WebAuthn
+        const DEBUG = false;
+        if (DEBUG) console.warn('Hera: WebAuthn detection message failed:', error.message);
       });
     } catch (error) {
-      console.warn('Hera: Failed to send WebAuthn detection to background:', error);
+      // Any unexpected error in message preparation
+      // Fail silently - never break WebAuthn for monitoring
+      const DEBUG = false;
+      if (DEBUG) console.warn('Hera: WebAuthn detection send error:', error);
     }
   }
 
@@ -443,6 +473,13 @@
 
   navigator.credentials.create = async function(options) {
     console.log('Hera: WebAuthn create() intercepted');
+
+    // DEFENSIVE: Validate options before analysis
+    // If invalid, pass through to let browser handle the error
+    if (!options || typeof options !== 'object') {
+      console.warn('Hera: Invalid options passed to create(), passing through to browser');
+      return await originalCreate(options);
+    }
 
     // Analyze registration options
     const issues = analyzeCreateOptions(options);
@@ -461,11 +498,9 @@
       });
     }
 
-    // Call original create
-    // CRITICAL FIX P0: Use navigator.credentials as context, not wrapper's 'this'
-    // WebAuthn validates the calling object must be navigator.credentials
+    // Call original create (context already bound via .bind())
     try {
-      const credential = await originalCreate.call(navigator.credentials, options);
+      const credential = await originalCreate(options);
 
       // Analyze response
       const responseIssues = analyzeAuthenticatorResponse(credential);
@@ -488,6 +523,13 @@
   navigator.credentials.get = async function(options) {
     console.log('Hera: WebAuthn get() intercepted');
 
+    // DEFENSIVE: Validate options before analysis
+    // If invalid, pass through to let browser handle the error
+    if (!options || typeof options !== 'object') {
+      console.warn('Hera: Invalid options passed to get(), passing through to browser');
+      return await originalGet(options);
+    }
+
     // Analyze authentication options
     const issues = analyzeGetOptions(options);
 
@@ -504,11 +546,9 @@
       });
     }
 
-    // Call original get
-    // CRITICAL FIX P0: Use navigator.credentials as context, not wrapper's 'this'
-    // WebAuthn validates the calling object must be navigator.credentials
+    // Call original get (context already bound via .bind())
     try {
-      const assertion = await originalGet.call(navigator.credentials, options);
+      const assertion = await originalGet(options);
 
       // Analyze response for counter validation
       const responseIssues = analyzeAuthenticatorResponse(assertion);
