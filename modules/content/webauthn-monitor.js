@@ -462,8 +462,10 @@
     }
 
     // Call original create
+    // CRITICAL FIX P0: Use navigator.credentials as context, not wrapper's 'this'
+    // WebAuthn validates the calling object must be navigator.credentials
     try {
-      const credential = await originalCreate.call(this, options);
+      const credential = await originalCreate.call(navigator.credentials, options);
 
       // Analyze response
       const responseIssues = analyzeAuthenticatorResponse(credential);
@@ -503,8 +505,10 @@
     }
 
     // Call original get
+    // CRITICAL FIX P0: Use navigator.credentials as context, not wrapper's 'this'
+    // WebAuthn validates the calling object must be navigator.credentials
     try {
-      const assertion = await originalGet.call(this, options);
+      const assertion = await originalGet.call(navigator.credentials, options);
 
       // Analyze response for counter validation
       const responseIssues = analyzeAuthenticatorResponse(assertion);
