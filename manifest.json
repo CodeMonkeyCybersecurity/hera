@@ -77,7 +77,8 @@
     {
       "resources": [
         "modules/*",
-        "modules/*/*"
+        "modules/*/*",
+        "site-reputation-overlay.js"
       ],
       "matches": ["<all_urls>"]
     }
