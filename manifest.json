@@ -39,12 +39,22 @@
     {
       "matches": ["<all_urls>"],
       "js": [
-        "modules/content/webauthn-monitor.js"
+        "modules/content/webauthn-interceptor.js"
       ],
       "run_at": "document_start",
       "all_frames": false,
       "world": "MAIN",
-      "comment": "WebAuthn API interceptor - must run in MAIN world to intercept navigator.credentials"
+      "comment": "WebAuthn API interceptor - MUST run in MAIN world to intercept navigator.credentials"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": [
+        "modules/content/webauthn-relay.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false,
+      "world": "ISOLATED",
+      "comment": "WebAuthn relay - forwards MAIN world messages to background via chrome.runtime"
     }
   ],
   "action": {
