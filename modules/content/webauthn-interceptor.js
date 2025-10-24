@@ -460,17 +460,19 @@
 
   // === INTERCEPT NAVIGATOR.CREDENTIALS.CREATE ===
 
-  navigator.credentials.create = async function(options) {
+  navigator.credentials.create = function(options) {
+    // CRITICAL: NOT async! This preserves user activation for cross-device WebAuthn
+    // See: https://developer.chrome.com/blog/user-activation
     console.log('Hera: WebAuthn create() intercepted');
 
     // DEFENSIVE: Validate options before analysis
     // If invalid, pass through to let browser handle the error
     if (!options || typeof options !== 'object') {
       console.warn('Hera: Invalid options passed to create(), passing through to browser');
-      return await originalCreate(options);
+      return originalCreate(options);
     }
 
-    // Analyze registration options
+    // Analyze registration options (synchronous - before calling native API)
     const issues = analyzeCreateOptions(options);
 
     if (issues.length > 0) {
@@ -487,11 +489,10 @@
       });
     }
 
-    // Call original create (context already bound via .bind())
-    try {
-      const credential = await originalCreate(options);
-
-      // Analyze response
+    // Call original and return Promise directly (preserves user activation)
+    // Use .then() instead of await to avoid async boundary
+    return originalCreate(options).then((credential) => {
+      // Analyze response after WebAuthn completes
       const responseIssues = analyzeAuthenticatorResponse(credential);
       if (responseIssues.length > 0) {
         console.log('Hera: WebAuthn create() response issues:', responseIssues);
@@ -500,26 +501,30 @@
         });
       }
 
-      return credential;
-    } catch (error) {
+      return credential; // Pass through unchanged
+    }).catch((error) => {
       console.log('Hera: WebAuthn create() failed:', error);
-      throw error;
-    }
+      throw error; // Re-throw so page sees the error
+    });
   };
 
   // === INTERCEPT NAVIGATOR.CREDENTIALS.GET ===
 
-  navigator.credentials.get = async function(options) {
+  navigator.credentials.get = function(options) {
+    // CRITICAL: NOT async! This preserves user activation for cross-device WebAuthn
+    // Cross-device auth with QR codes can take 10-30 seconds (scan, connect, confirm on phone)
+    // User activation expires after ~5 seconds, so async/await breaks it
+    // See: https://developer.chrome.com/blog/user-activation
     console.log('Hera: WebAuthn get() intercepted');
 
     // DEFENSIVE: Validate options before analysis
     // If invalid, pass through to let browser handle the error
     if (!options || typeof options !== 'object') {
       console.warn('Hera: Invalid options passed to get(), passing through to browser');
-      return await originalGet(options);
+      return originalGet(options);
     }
 
-    // Analyze authentication options
+    // Analyze authentication options (synchronous - before calling native API)
     const issues = analyzeGetOptions(options);
 
     if (issues.length > 0) {
@@ -535,11 +540,10 @@
       });
     }
 
-    // Call original get (context already bound via .bind())
-    try {
-      const assertion = await originalGet(options);
-
-      // Analyze response for counter validation
+    // Call original and return Promise directly (preserves user activation)
+    // Use .then() instead of await to avoid async boundary
+    return originalGet(options).then((assertion) => {
+      // Analyze response after WebAuthn completes (could be 30s for cross-device)
       const responseIssues = analyzeAuthenticatorResponse(assertion);
       if (responseIssues.length > 0) {
         console.log('Hera: WebAuthn get() response issues:', responseIssues);
@@ -548,11 +552,11 @@
         });
       }
 
-      return assertion;
-    } catch (error) {
+      return assertion; // Pass through unchanged
+    }).catch((error) => {
       console.log('Hera: WebAuthn get() failed:', error);
-      throw error;
-    }
+      throw error; // Re-throw so page sees the error
+    });
   };
 
   console.log('Hera: WebAuthn interceptor initialized (MAIN world)');

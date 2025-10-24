@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Hera Auth Security Monitor",
-  "version": "2.0",
+  "version": "0.1.0",
   "description": "Authentication & Authorization vulnerability detection. Monitors OAuth/OIDC/SAML/SCIM flows, JWT tokens, session security, password strength, MFA usage, and common auth misconfigurations.",
   "permissions": [
     "storage",
