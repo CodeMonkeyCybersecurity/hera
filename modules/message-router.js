@@ -61,21 +61,17 @@ export class MessageRouter {
 
     // Action-based messages
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      console.log('MessageRouter: Message received (action handler):', {
-        action: message.action,
-        type: message.type,
-        senderUrl: sender.url
-      });
+      if (message.action) {
+        console.debug(`[Message] ${message.action} from ${new URL(sender.url || 'unknown').hostname}`);
+      }
       return this.handleActionMessage(message, sender, sendResponse);
     });
 
     // Type-based messages (analysis results)
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      console.log('MessageRouter: Message received (type handler):', {
-        action: message.action,
-        type: message.type,
-        senderUrl: sender.url
-      });
+      if (message.type && !message.action) {
+        console.debug(`[Message] ${message.type} from ${new URL(sender.url || 'unknown').hostname}`);
+      }
       return this.handleTypeMessage(message, sender, sendResponse);
     });
 
@@ -717,24 +713,50 @@ export class MessageRouter {
    * Stores analysis results from content script
    */
   handleAnalysisComplete(message, sendResponse) {
-    console.log('MessageRouter: handleAnalysisComplete called');
-    console.log('MessageRouter: Message data:', {
-      url: message.url,
-      hasScore: !!message.score,
-      findingsCount: message.findings?.length || 0
-    });
-
     if (!message.url || !message.score) {
-      console.error('MessageRouter: ANALYSIS_COMPLETE missing required fields:', {
-        hasUrl: !!message.url,
-        hasScore: !!message.score
-      });
+      console.error('[Analysis] Missing required fields (url or score)');
       sendResponse({ success: false, error: 'Invalid analysis data' });
       return false;
     }
 
-    console.log('MessageRouter: Analysis complete for:', message.url);
-    console.log('MessageRouter: Score data:', message.score);
+    // P0 FIX: Human-friendly summary with actual findings
+    const domain = new URL(message.url).hostname;
+    const score = message.score;
+    const findingsCount = message.findings?.length || 0;
+
+    // Calculate risk rating
+    let rating = 'EXCELLENT';
+    if (score.total < 90) rating = 'GOOD';
+    if (score.total < 70) rating = 'FAIR';
+    if (score.total < 50) rating = 'POOR';
+    if (score.total < 30) rating = 'CRITICAL';
+
+    // Group findings by severity
+    const findings = message.findings || [];
+    const bySeverity = findings.reduce((acc, f) => {
+      const sev = f.severity || 'UNKNOWN';
+      acc[sev] = (acc[sev] || 0) + 1;
+      return acc;
+    }, {});
+
+    const severitySummary = Object.entries(bySeverity)
+      .map(([sev, count]) => `${count} ${sev}`)
+      .join(', ') || 'none';
+
+    console.log(`[Analysis] ${domain} - Score: ${score.total}/100 (${rating})`);
+    console.log(`  Findings: ${findingsCount} (${severitySummary})`);
+
+    // Log top findings (if any)
+    if (findings.length > 0) {
+      const topFindings = findings.slice(0, 3);
+      topFindings.forEach(finding => {
+        const icon = finding.severity === 'HIGH' || finding.severity === 'CRITICAL' ? '❌' : '⚠️';
+        console.log(`  ${icon} ${finding.title || finding.type}`);
+      });
+      if (findings.length > 3) {
+        console.log(`  ... and ${findings.length - 3} more`);
+      }
+    }
 
     // Store the analysis results
     const analysisData = {
@@ -745,13 +767,12 @@ export class MessageRouter {
       analysisSuccessful: message.analysisSuccessful !== false
     };
 
-    console.log('MessageRouter: Storing analysis data to chrome.storage.local...');
     chrome.storage.local.set({ heraSiteAnalysis: analysisData }, () => {
       if (chrome.runtime.lastError) {
-        console.error('MessageRouter: Error storing analysis:', chrome.runtime.lastError);
+        console.error('[Analysis] Storage failed:', chrome.runtime.lastError.message);
         sendResponse({ success: false, error: chrome.runtime.lastError.message });
       } else {
-        console.log('MessageRouter: Analysis results stored successfully');
+        console.log(`[Analysis] Results stored - Click Hera icon to view details`);
         sendResponse({ success: true });
       }
     });
@@ -763,11 +784,8 @@ export class MessageRouter {
    * Handle type-based messages (analysis results)
    */
   handleTypeMessage(message, sender, sendResponse) {
-    console.log('MessageRouter: handleTypeMessage called with:', { type: message.type, senderUrl: sender.url });
-
     // Skip if this is an 'action' message
     if (message.action) {
-      console.log('MessageRouter: Skipping - has action property');
       return false;
     }
 
@@ -783,12 +801,6 @@ export class MessageRouter {
     const isAuthorizedSender = this.allowedSenderUrls.some(allowed =>
       senderUrl.startsWith(allowed)
     );
-
-    console.log('MessageRouter: Authorization check:', {
-      senderUrl,
-      isAuthorizedSender,
-      allowedUrls: this.allowedSenderUrls
-    });
 
     const contentScriptAllowedTypes = [
       'ANALYSIS_COMPLETE',
@@ -806,41 +818,35 @@ export class MessageRouter {
     }
 
     // Route type-based messages
-    console.log(`MessageRouter: Routing type-based message: ${message.type}`);
     switch (message.type) {
       case 'GET_SITE_ANALYSIS':
-        console.log('MessageRouter: Calling handleGetSiteAnalysis');
         return this.handleGetSiteAnalysis(sendResponse);
 
       case 'TRIGGER_ANALYSIS':
-        console.log('MessageRouter: Calling handleTriggerAnalysis');
         return this.handleTriggerAnalysis(sendResponse);
 
       case 'ANALYSIS_COMPLETE':
-        console.log('MessageRouter: Calling handleAnalysisComplete');
         return this.handleAnalysisComplete(message, sendResponse);
 
       case 'ANALYSIS_ERROR':
-        console.error('Analysis error received:', message.error);
+        console.error(`[Analysis] Error: ${message.error}`);
         sendResponse({ success: false, error: message.error });
         return false;
 
       case 'WEBAUTHN_DETECTION':
-        console.log('MessageRouter: Calling handleWebAuthnDetection');
         return this.handleWebAuthnDetection(message, sendResponse);
 
       case 'INJECT_RESPONSE_INTERCEPTOR':
-        console.log('MessageRouter: Calling handleInterceptorInjection');
         this.handleInterceptorInjection(sender, message)
           .then(sendResponse)
           .catch(error => {
-            console.error('Interceptor injection failed:', error);
+            console.error(`[Interceptor] Injection failed: ${error.message}`);
             sendResponse({ success: false, error: error.message });
           });
         return true; // Async response
 
       default:
-        console.log('Hera: Unhandled type-based message:', message.type);
+        console.debug(`[Message] Unhandled: ${message.type}`);
         return false;
     }
   }

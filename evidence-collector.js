@@ -32,54 +32,176 @@ class EvidenceCollector {
 
     // PHASE 1: Initialize request body capturer
     this.bodyCapturer = new RequestBodyCapturer();
+
+    // P0 FIX: IndexedDB for large evidence persistence
+    this.db = null;
+    this.lastSyncTime = null;
+    this.SYNC_INTERVAL_MS = 60000; // Auto-save every 60 seconds
+    this.autoSaveTimer = null;
   }
 
   async initialize() {
     if (this.initialized) return;
 
     try {
-      // CRITICAL FIX P0: Use chrome.storage.local for evidence (survives browser restart)
-      // Evidence is critical for vulnerability reports and should persist
-      const data = await chrome.storage.local.get(['heraEvidence', 'heraEvidenceSchemaVersion']);
+      // P0 FIX: Initialize IndexedDB for persistent evidence storage
+      await this._initIndexedDB();
 
-      // SECURITY FIX P2-NEW: Schema version check and migration
-      const storedVersion = data.heraEvidenceSchemaVersion || 0;
-      if (storedVersion < this.SCHEMA_VERSION) {
-        console.log(`Hera: Evidence schema v${storedVersion} → v${this.SCHEMA_VERSION}`);
-        // Future migrations would go here
-      }
+      // Try to restore from IndexedDB first (larger storage)
+      const evidence = await this._loadFromIndexedDB();
 
-      if (data.heraEvidence) {
-        const evidence = data.heraEvidence;
-
+      if (evidence) {
         if (evidence.responseCache) {
-          for (const [id, item] of Object.entries(evidence.responseCache)) {
-            this._responseCache.set(id, item);
-          }
+          this._responseCache = new Map(Object.entries(evidence.responseCache));
         }
-
         if (evidence.flowCorrelation) {
-          for (const [id, item] of Object.entries(evidence.flowCorrelation)) {
-            this._flowCorrelation.set(id, item);
-          }
+          this._flowCorrelation = new Map(Object.entries(evidence.flowCorrelation));
         }
-
         this._proofOfConcepts = evidence.proofOfConcepts || [];
         this._timeline = evidence.timeline || [];
-
         if (evidence.activeFlows) {
-          for (const [id, flow] of Object.entries(evidence.activeFlows)) {
-            this._activeFlows.set(id, flow);
-          }
+          this._activeFlows = new Map(Object.entries(evidence.activeFlows));
         }
 
-        console.log(`Hera: Restored evidence (${this._responseCache.size} responses, ${this._timeline.length} events)`);
+        console.log(`[Evidence] Restored ${this._responseCache.size} responses, ${this._timeline.length} events from IndexedDB`);
+      } else {
+        // Fallback: Try chrome.storage.local (legacy)
+        const data = await chrome.storage.local.get(['heraEvidence', 'heraEvidenceSchemaVersion']);
+
+        if (data.heraEvidence) {
+          const legacyEvidence = data.heraEvidence;
+          if (legacyEvidence.responseCache) {
+            this._responseCache = new Map(Object.entries(legacyEvidence.responseCache));
+          }
+          if (legacyEvidence.flowCorrelation) {
+            this._flowCorrelation = new Map(Object.entries(legacyEvidence.flowCorrelation));
+          }
+          this._proofOfConcepts = legacyEvidence.proofOfConcepts || [];
+          this._timeline = legacyEvidence.timeline || [];
+
+          console.log(`[Evidence] Migrated ${this._responseCache.size} responses from chrome.storage.local`);
+
+          // Migrate to IndexedDB and clean up old storage
+          await this._saveToIndexedDB();
+          await chrome.storage.local.remove(['heraEvidence']);
+        }
       }
+
+      // P0 FIX: Start auto-save timer
+      this._startAutoSave();
 
       this.initialized = true;
     } catch (error) {
       console.error('Hera: Failed to initialize evidence collector:', error);
       this.initialized = true;
+    }
+  }
+
+  /**
+   * P0 FIX: Initialize IndexedDB for evidence persistence
+   */
+  async _initIndexedDB() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('HeraEvidence', 1);
+
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        this.db = request.result;
+        resolve();
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+
+        // Create object store for evidence
+        if (!db.objectStoreNames.contains('evidence')) {
+          db.createObjectStore('evidence', { keyPath: 'id' });
+        }
+      };
+    });
+  }
+
+  /**
+   * P0 FIX: Load evidence from IndexedDB
+   */
+  async _loadFromIndexedDB() {
+    if (!this.db) return null;
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['evidence'], 'readonly');
+      const store = transaction.objectStore('evidence');
+      const request = store.get('current');
+
+      request.onsuccess = () => {
+        resolve(request.result?.data || null);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  /**
+   * P0 FIX: Save evidence to IndexedDB
+   */
+  async _saveToIndexedDB() {
+    if (!this.db) return;
+
+    const evidence = {
+      responseCache: Object.fromEntries(this._responseCache.entries()),
+      flowCorrelation: Object.fromEntries(this._flowCorrelation.entries()),
+      proofOfConcepts: this._proofOfConcepts,
+      timeline: this._timeline,
+      activeFlows: Object.fromEntries(this._activeFlows.entries())
+    };
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['evidence'], 'readwrite');
+      const store = transaction.objectStore('evidence');
+      const request = store.put({
+        id: 'current',
+        data: evidence,
+        timestamp: Date.now()
+      });
+
+      request.onsuccess = () => {
+        this.lastSyncTime = Date.now();
+        resolve();
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  /**
+   * P0 FIX: Start auto-save timer
+   */
+  _startAutoSave() {
+    // Clear existing timer
+    if (this.autoSaveTimer) {
+      clearInterval(this.autoSaveTimer);
+    }
+
+    // Auto-save every 60 seconds
+    this.autoSaveTimer = setInterval(async () => {
+      try {
+        await this._saveToIndexedDB();
+        const secondsAgo = Math.floor((Date.now() - this.lastSyncTime) / 1000);
+        console.debug(`[Evidence] Auto-saved to IndexedDB (last sync: ${secondsAgo}s ago)`);
+      } catch (error) {
+        console.error('[Evidence] Auto-save failed:', error);
+      }
+    }, this.SYNC_INTERVAL_MS);
+
+    // Save on visibility change (tab hidden/closed)
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', async () => {
+        if (document.visibilityState === 'hidden') {
+          try {
+            await this._saveToIndexedDB();
+            console.debug('[Evidence] Saved to IndexedDB (visibility change)');
+          } catch (error) {
+            console.error('[Evidence] Visibility save failed:', error);
+          }
+        }
+      });
     }
   }
 
@@ -161,12 +283,17 @@ class EvidenceCollector {
         return; // Don't write this sync, wait for next sync with smaller data
       }
 
-      // DISABLED: Evidence cache causes 8MB storage bloat, nothing uses it
-      // All actual auth data goes to heraSessions (managed by storage-manager.js)
-      // This was designed for "evidence-based verification" but UI only reads heraSessions
+      // P0 FIX: Now using IndexedDB for persistent storage (no quota limits)
+      // Don't sync to chrome.storage.local - IndexedDB handles it
+      const secondsSinceLastSync = this.lastSyncTime
+        ? Math.floor((Date.now() - this.lastSyncTime) / 1000)
+        : 0;
 
-      // Don't sync to chrome.storage - saves 8MB+ of quota
-      console.log(`Hera: Evidence cache (in-memory only, NOT synced): ${this._responseCache.size} responses, ${this._timeline.length} events, ${evidenceMB} MB`);
+      const syncStatus = this.lastSyncTime
+        ? `✓ Saved ${secondsSinceLastSync}s ago`
+        : '⏳ Syncing...';
+
+      console.log(`[Evidence] ${this._responseCache.size} responses, ${this._timeline.length} events (${evidenceMB} MB) - ${syncStatus}`);
 
     } catch (error) {
       if (error.message?.includes('QUOTA')) {
@@ -216,14 +343,18 @@ class EvidenceCollector {
   }
 
   _debouncedSync() {
-    // P3-SIXTEENTH-2: DEBOUNCE TIMING - 1000ms (vs memory-manager's 100ms)
-    // Evidence collection is medium-priority (used for vulnerability reports)
-    // Longer debounce reduces quota pressure from storing large response bodies
-    // Acceptable data loss: Response bodies lost if browser crashes (auth requests still persisted)
+    // P0 FIX: Save to IndexedDB (persistent, no quota limits)
+    // Debounced to avoid excessive writes on high-traffic sites
     if (this._syncTimeout) clearTimeout(this._syncTimeout);
-    this._syncTimeout = setTimeout(() => {
-      this._syncToStorage().catch(err => console.error('Evidence sync failed:', err));
-    }, 1000); // 1 second debounce - see rationale above
+    this._syncTimeout = setTimeout(async () => {
+      try {
+        await this._saveToIndexedDB();
+        // Also update the console log
+        await this._syncToStorage();
+      } catch (err) {
+        console.error('[Evidence] Sync failed:', err);
+      }
+    }, 1000); // 1 second debounce
   }
 
   // Getters for backward compatibility
