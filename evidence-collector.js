@@ -164,6 +164,40 @@ class EvidenceCollector {
   }
 
   /**
+   * P0 FIX: Serialize data for IndexedDB (remove non-cloneable objects)
+   */
+  _serializeForStorage(data) {
+    try {
+      // Deep clone using JSON (this will fail on non-serializable data)
+      // but will help us identify the issue
+      return JSON.parse(JSON.stringify(data, (key, value) => {
+        // Filter out non-serializable types
+        if (value instanceof Promise) {
+          console.warn(`[Evidence] Removed Promise from key: ${key}`);
+          return undefined;
+        }
+        if (typeof value === 'function') {
+          console.warn(`[Evidence] Removed function from key: ${key}`);
+          return undefined;
+        }
+        if (value instanceof Error) {
+          // Serialize errors as objects
+          return {
+            __error: true,
+            message: value.message,
+            name: value.name,
+            stack: value.stack
+          };
+        }
+        return value;
+      }));
+    } catch (error) {
+      console.error('[Evidence] Serialization failed:', error);
+      return null;
+    }
+  }
+
+  /**
    * P0 FIX: Save evidence to IndexedDB
    */
   async _saveToIndexedDB() {
@@ -174,13 +208,23 @@ class EvidenceCollector {
     }
 
     try {
-      const evidence = {
+      // Serialize Maps to plain objects
+      const rawEvidence = {
         responseCache: Object.fromEntries(this._responseCache.entries()),
         flowCorrelation: Object.fromEntries(this._flowCorrelation.entries()),
         proofOfConcepts: this._proofOfConcepts,
         timeline: this._timeline,
         activeFlows: Object.fromEntries(this._activeFlows.entries())
       };
+
+      // Clean up non-serializable data
+      const evidence = this._serializeForStorage(rawEvidence);
+
+      if (!evidence) {
+        console.error('[Evidence] Failed to serialize evidence - skipping save');
+        this.lastSyncTime = Date.now();
+        return;
+      }
 
       return new Promise((resolve, reject) => {
         const transaction = this.db.transaction(['evidence'], 'readwrite');
@@ -193,16 +237,28 @@ class EvidenceCollector {
 
         request.onsuccess = () => {
           this.lastSyncTime = Date.now();
+          console.debug('[Evidence] Saved to IndexedDB successfully');
           resolve();
         };
         request.onerror = () => {
-          console.warn('[Evidence] Save to IndexedDB failed:', request.error);
+          const errorMsg = request.error?.message || String(request.error);
+          console.warn('[Evidence] IndexedDB save failed:', errorMsg);
+
+          // Log detailed error for debugging
+          if (errorMsg.includes('DataCloneError')) {
+            console.error('[Evidence] DataCloneError - evidence contains non-cloneable data');
+            console.error('[Evidence] Evidence keys:', Object.keys(rawEvidence));
+            console.error('[Evidence] ResponseCache size:', this._responseCache.size);
+            console.error('[Evidence] FlowCorrelation size:', this._flowCorrelation.size);
+          }
+
           this.lastSyncTime = Date.now();
           resolve(); // Don't fail - just mark as synced
         };
       });
     } catch (error) {
       console.warn('[Evidence] IndexedDB save error:', error.message);
+      console.error('[Evidence] Full error:', error);
       this.lastSyncTime = Date.now();
       // Continue without failing
     }
@@ -381,7 +437,13 @@ class EvidenceCollector {
         // Also update the console log
         await this._syncToStorage();
       } catch (err) {
-        console.error('[Evidence] Sync failed:', err);
+        console.error('[Evidence] Sync failed:', err.message);
+
+        // Additional debug info for common errors
+        if (err.name === 'DataCloneError') {
+          console.error('[Evidence] DataCloneError - evidence contains non-serializable data (Promise, Function, etc.)');
+          console.error('[Evidence] Check what is being stored in responseCache or flowCorrelation');
+        }
       }
     }, 1000); // 1 second debounce
   }
