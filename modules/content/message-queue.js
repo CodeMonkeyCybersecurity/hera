@@ -19,8 +19,55 @@ export class ThrottledMessageQueue {
       'default': 500                // 2 per second for others
     };
 
-    // SECURITY FIX NEW-P0-3: Cleanup on page unload
-    window.addEventListener('unload', () => this.cleanup());
+    // P0 FIX: Use modern lifecycle events instead of deprecated 'unload'
+    // unload is blocked by Permissions Policy on many sites (DuckDuckGo, etc.)
+    this._setupModernCleanupHandlers();
+  }
+
+  /**
+   * P0 FIX: Modern page lifecycle handling
+   * Uses visibilitychange + pagehide instead of deprecated unload event
+   */
+  _setupModernCleanupHandlers() {
+    // Strategy 1: Flush queue when page is hidden (mobile-friendly)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        console.debug('[MessageQueue] Page hidden - flushing queue');
+        this._flushQueue();
+      }
+    });
+
+    // Strategy 2: Final flush on pagehide (more reliable than unload)
+    window.addEventListener('pagehide', (event) => {
+      console.debug('[MessageQueue] Page hiding - final flush');
+      this._flushQueue();
+    });
+
+    // Strategy 3: Periodic auto-flush (don't rely solely on events)
+    this.autoFlushInterval = setInterval(() => {
+      if (this.queue.length > 0) {
+        console.debug(`[MessageQueue] Auto-flush: ${this.queue.length} queued`);
+        this._processQueue();
+      }
+    }, 5000); // Auto-flush every 5 seconds
+  }
+
+  /**
+   * Flush all queued messages immediately (bypass throttling)
+   */
+  _flushQueue() {
+    console.debug(`[MessageQueue] Flushing ${this.queue.length} messages`);
+
+    // Sort by priority before flushing
+    this.queue.sort((a, b) => b.priority - a.priority);
+
+    // Send all messages immediately
+    while (this.queue.length > 0) {
+      const item = this.queue.shift();
+      this._sendMessage(item.message);
+    }
+
+    this.processing = false;
   }
 
   getThrottleRate(messageType) {
@@ -131,9 +178,18 @@ export class ThrottledMessageQueue {
   }
 
   cleanup() {
+    // Flush any remaining messages before cleanup
+    this._flushQueue();
+
+    // Clear auto-flush interval
+    if (this.autoFlushInterval) {
+      clearInterval(this.autoFlushInterval);
+      this.autoFlushInterval = null;
+    }
+
     this.queue = [];
     this.processing = false;
-    console.log('Hera: Message queue cleaned up');
+    console.debug('[MessageQueue] Cleaned up');
   }
 }
 

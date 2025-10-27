@@ -12,6 +12,36 @@
 **Solution:** Implemented IndexedDB auto-save every 60 seconds
 **Status:** SHIPPED
 
+### P0-4: Permissions Policy Violation (unload event) ✅
+**Problem:** `unload` event blocked by Permissions Policy on modern sites (DuckDuckGo, etc.)
+**Solution:** Replaced deprecated `unload` with modern `visibilitychange` + `pagehide` + auto-flush
+**Status:** SHIPPED
+
+**Error before:**
+```
+Permissions policy violation: unload is not allowed in this document.
+Context: https://duckduckgo.com/
+Stack Trace: modules/content/message-queue.js:23 (ThrottledMessageQueue)
+```
+
+**Why this happened:**
+- `unload` event is deprecated (2020+)
+- Modern sites block it via Permissions-Policy header
+- Breaks back/forward cache (bfcache)
+- Unreliable (fires only 50-70% of the time on mobile)
+
+**Solution implemented:**
+1. **visibilitychange** - Flush queue when page hidden (mobile-friendly)
+2. **pagehide** - Final flush before page destroyed (more reliable)
+3. **Auto-flush** - Periodic flush every 5 seconds (don't rely on events)
+
+**New behavior:**
+```javascript
+[MessageQueue] Page hidden - flushing queue
+[MessageQueue] Flushing 3 messages
+[MessageQueue] Sent: ANALYSIS_COMPLETE
+```
+
 **Changes:**
 - Auto-save to IndexedDB every 60 seconds
 - Save on visibility change (tab hidden/closed)
@@ -89,6 +119,102 @@ MessageRouter: Analysis results stored successfully
 ---
 
 ## P1 Issues - Short Term (1-2 weeks)
+
+### P1-0: Message Queue Reliability Improvements
+**Status:** PLANNED
+
+**Goal:** Prevent message loss on page navigation/crash
+
+**Current issues:**
+1. Messages lost if user closes tab immediately
+2. No persistence - queue is memory-only
+3. No retry logic for failed sends
+4. No expiration - messages can queue forever
+
+**Implementation:**
+
+```javascript
+class ThrottledMessageQueue {
+  constructor() {
+    // ... existing code ...
+    this.MAX_MESSAGE_AGE_MS = 5 * 60 * 1000; // 5 minutes
+    this._restorePersistedQueue(); // Load from storage on init
+  }
+
+  // 1. Persist queue to chrome.storage.session
+  async _persistQueue() {
+    await chrome.storage.session.set({
+      heraMessageQueue: this.queue.map(item => ({
+        message: item.message,
+        priority: item.priority,
+        timestamp: item.timestamp,
+        expiresAt: item.expiresAt
+      }))
+    });
+  }
+
+  // 2. Restore queue on initialization
+  async _restorePersistedQueue() {
+    const data = await chrome.storage.session.get('heraMessageQueue');
+    if (data.heraMessageQueue) {
+      this.queue = data.heraMessageQueue;
+      this._removeExpiredMessages();
+      console.log(`[MessageQueue] Restored ${this.queue.length} messages`);
+      this._processQueue();
+    }
+  }
+
+  // 3. Remove expired messages
+  _removeExpiredMessages() {
+    const now = Date.now();
+    const before = this.queue.length;
+    this.queue = this.queue.filter(item => item.expiresAt > now);
+    const removed = before - this.queue.length;
+    if (removed > 0) {
+      console.warn(`[MessageQueue] Removed ${removed} expired messages`);
+    }
+  }
+
+  // 4. Retry logic with exponential backoff
+  async _sendMessage(message, retries = 3) {
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        await chrome.runtime.sendMessage(message);
+        return true;
+      } catch (error) {
+        if (attempt < retries - 1) {
+          const delay = Math.pow(2, attempt) * 100; // 100ms, 200ms, 400ms
+          await new Promise(resolve => setTimeout(resolve, delay));
+        } else {
+          // Last resort: persist to failed message queue
+          this._persistFailedMessage(message);
+          return false;
+        }
+      }
+    }
+  }
+
+  // 5. Failed message recovery
+  _persistFailedMessage(message) {
+    chrome.storage.local.get(['heraFailedMessages'], (result) => {
+      const failed = result.heraFailedMessages || [];
+      failed.push({
+        message,
+        failedAt: Date.now(),
+        retries: 0
+      });
+      chrome.storage.local.set({
+        heraFailedMessages: failed.slice(-50) // Keep last 50
+      });
+      console.error(`[MessageQueue] Message failed - stored for recovery`);
+    });
+  }
+}
+```
+
+**User benefit:** No more lost security analysis results
+
+---
 
 ### P1-1: Evidence Export Notifications
 **Status:** PLANNED
