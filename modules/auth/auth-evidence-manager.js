@@ -4,7 +4,8 @@
 import { OAuth2Analyzer } from './oauth2-analyzer.js';
 
 class AuthEvidenceManager {
-  constructor(oauth2Verifier = null, hstsVerifier = null) {
+  constructor(utilFunctions, oauth2Verifier = null, hstsVerifier = null) {
+    this.utilFunctions = utilFunctions;
     this.oauth2Verifier = oauth2Verifier;
     this.hstsVerifier = hstsVerifier;
     this.verificationResults = new Map();
@@ -15,12 +16,11 @@ class AuthEvidenceManager {
    * Calculate confidence level for a security finding
    * @param {Object} issue - Security issue object
    * @param {Object} request - Request object
-   * @param {Function} parseParams - Function to parse URL parameters
    * @returns {string} Confidence level (HIGH/MEDIUM/LOW)
    */
-  calculateConfidence(issue, request, parseParams) {
+  calculateConfidence(issue, request) {
     try {
-      const params = parseParams ? parseParams(request.url) : {};
+      const params = this.utilFunctions ? this.utilFunctions.parseParams(request.url) : {};
       const issueType = issue.type;
       const severity = issue.severity;
 
@@ -84,12 +84,11 @@ class AuthEvidenceManager {
    * Gather evidence for a security issue
    * @param {Object} issue - Security issue object
    * @param {Object} request - Request object
-   * @param {Function} parseParams - Function to parse URL parameters
    * @returns {Object} Evidence object
    */
-  gatherEvidence(issue, request, parseParams) {
+  gatherEvidence(issue, request) {
     try {
-      const params = parseParams(request.url);
+      const params = this.utilFunctions ? this.utilFunctions.parseParams(request.url) : {};
       const evidence = {
         hasState: !!params.state,
         stateLength: params.state ? params.state.length : 0,
@@ -139,14 +138,13 @@ class AuthEvidenceManager {
    * Enhance an issue with confidence levels and evidence
    * @param {Object} issue - Base issue object
    * @param {Object} request - Request object
-   * @param {Function} parseParams - Function to parse URL parameters
    * @returns {Object} Enhanced issue with evidence
    */
-  enhanceIssue(issue, request, parseParams) {
+  enhanceIssue(issue, request) {
     const enhanced = {
       ...issue,
-      confidence: this.calculateConfidence(issue, request, parseParams),
-      evidence: this.gatherEvidence(issue, request, parseParams),
+      confidence: this.calculateConfidence(issue, request),
+      evidence: this.gatherEvidence(issue, request),
       recommendation: this.getIssueRecommendation(issue.type)
     };
 
@@ -275,12 +273,11 @@ class AuthEvidenceManager {
   /**
    * Replace pattern-based OAuth2 state detection with evidence-based verification
    * @param {Object} request - Request object
-   * @param {Function} parseParams - Function to parse URL parameters
    * @returns {Object|null} Evidence-based analysis results
    */
-  async analyzeOAuth2WithEvidence(request, parseParams) {
+  async analyzeOAuth2WithEvidence(request) {
     const url = request.url;
-    const params = parseParams(url);
+    const params = this.utilFunctions ? this.utilFunctions.parseParams(url) : {};
 
     // Check if this is an OAuth2 authorization request
     if (!params?.client_id && !url.includes('oauth') && !url.includes('authorize')) {

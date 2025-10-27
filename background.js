@@ -112,6 +112,113 @@ const heraStore = {
 // Badge update helper
 const updateBadge = () => storageManager.updateBadge();
 
+/**
+ * Handle response interceptor injection
+ * Injects response-interceptor.js into the content script's tab
+ * @param {Object} sender - Chrome message sender
+ * @param {Object} message - Message with injection request
+ * @returns {Promise<Object>} Injection result
+ */
+async function handleInterceptorInjection(sender, message) {
+  try {
+    const tabId = sender.tab?.id;
+    let url = sender.tab?.url;
+
+    if (!tabId) {
+      return { success: false, error: 'No tab ID available' };
+    }
+
+    // Get latest tab URL to prevent race condition
+    const tab = await chrome.tabs.get(tabId);
+    url = tab.url;
+
+    // Enhanced URL validation
+    if (!url || url.startsWith('chrome://') || url.startsWith('about:') ||
+        url.startsWith('chrome-extension://') || url.startsWith('edge://') ||
+        url.startsWith('chrome-devtools://') || url.startsWith('view-source:')) {
+      console.debug(`Hera: Skipping interceptor injection on restricted page: ${url}`);
+      return { success: false, error: 'Cannot inject on restricted pages' };
+    }
+
+    // Validate URL is HTTP/HTTPS only
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      console.debug(`Hera: Skipping injection on non-HTTP(S) page: ${url}`);
+      return { success: false, error: 'Only HTTP(S) pages supported' };
+    }
+
+    // Check if chrome.scripting API is available
+    if (!chrome.scripting || !chrome.scripting.executeScript) {
+      console.error('Hera: chrome.scripting API not available');
+      return { success: false, error: 'Scripting permission not available' };
+    }
+
+    // Check if we have permission for this URL
+    const hasPermission = await chrome.permissions.contains({
+      origins: [new URL(url).origin + '/*']
+    });
+
+    if (!hasPermission) {
+      console.debug(`Hera: No permission for ${url}`);
+      return { success: false, error: 'Host permission not granted for this site' };
+    }
+
+    // Double-check permission right before injection
+    const hasPermissionNow = await chrome.permissions.contains({
+      origins: [new URL(url).origin + '/*']
+    });
+
+    if (!hasPermissionNow) {
+      console.warn('Hera: Permission revoked between check and injection');
+      return { success: false, error: 'Permission no longer available' };
+    }
+
+    // Validate script path against whitelist
+    const scriptFile = 'response-interceptor.js';
+
+    if (!ALLOWED_SCRIPTS.has(scriptFile)) {
+      console.error(`Hera: Attempted to inject non-whitelisted script: ${scriptFile}`);
+      return { success: false, error: 'Invalid script path' };
+    }
+
+    // Third check right before injection (TOCTOU protection)
+    const latestTab = await chrome.tabs.get(tabId);
+    if (latestTab.url !== url) {
+      console.warn(`Hera SECURITY: Tab URL changed during injection (TOCTOU blocked)`);
+      return { success: false, error: 'Tab URL changed during injection (security block)' };
+    }
+
+    // Wrap injection in try-catch to handle permission revocation
+    try {
+      const result = await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        world: 'ISOLATED',
+        files: [scriptFile]
+      });
+
+      // Check for Chrome runtime errors
+      if (chrome.runtime.lastError) {
+        console.error('Hera: Injection failed:', chrome.runtime.lastError);
+        return { success: false, error: chrome.runtime.lastError.message };
+      }
+
+      console.log(`Hera: Response interceptor injected in isolated world for tab ${tabId}`);
+      return { success: true };
+
+    } catch (injectionError) {
+      // Catch errors from permission revocation mid-flight
+      if (injectionError.message?.includes('permission') ||
+          injectionError.message?.includes('Cannot access')) {
+        console.debug('Hera: Injection blocked - permission revoked');
+        return { success: false, error: 'Permission revoked during injection' };
+      }
+      throw injectionError;
+    }
+  } catch (error) {
+    console.error('Hera: Failed to inject response interceptor:', error.message);
+    return { success: false, error: error.message || 'Unknown error' };
+  }
+}
+
 // Proxy wrappers for backward compatibility
 const authRequestsWrapperCache = new Map();
 const authRequests = new Proxy(memoryManager.authRequests, {
@@ -258,7 +365,7 @@ const messageRouter = new MessageRouter(
   storageManager,
   memoryManager,
   updateBadge,
-  null, // handleInterceptorInjection - will be added in Phase 3
+  handleInterceptorInjection,
   generateSessionId,
   heraStore,
   errorCollector

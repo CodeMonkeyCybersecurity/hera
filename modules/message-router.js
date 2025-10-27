@@ -829,6 +829,16 @@ export class MessageRouter {
         console.log('MessageRouter: Calling handleWebAuthnDetection');
         return this.handleWebAuthnDetection(message, sendResponse);
 
+      case 'INJECT_RESPONSE_INTERCEPTOR':
+        console.log('MessageRouter: Calling handleInterceptorInjection');
+        this.handleInterceptorInjection(sender, message)
+          .then(sendResponse)
+          .catch(error => {
+            console.error('Interceptor injection failed:', error);
+            sendResponse({ success: false, error: error.message });
+          });
+        return true; // Async response
+
       default:
         console.log('Hera: Unhandled type-based message:', message.type);
         return false;
