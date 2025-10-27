@@ -68,30 +68,36 @@ export class WebRequestListeners {
       (details) => {
         // CRITICAL FIX P0: Wait for initialization before processing
         if (!this.heraReady()) {
-          console.warn('Hera: Not ready, skipping request:', details.url);
-          return;
+          return; // Silent skip during initialization
         }
 
-        const isAuthRelated = this.heraAuthDetector.isAuthRequest(details.url, {});
-        if (isAuthRelated) {
-          // SECURITY FIX P2: Generate nonce for request/response matching
-          const requestNonce = crypto.randomUUID();
+        try {
+          const isAuthRelated = this.heraAuthDetector.isAuthRequest(details.url, {});
+          if (isAuthRelated) {
+            // SECURITY FIX P2: Generate nonce for request/response matching
+            const requestNonce = crypto.randomUUID();
 
-          this.authRequests.set(details.requestId, {
-            id: details.requestId,
-            url: details.url,
-            method: details.method,
-            type: details.type,
-            tabId: details.tabId,
-            timestamp: new Date().toISOString(),
-            requestBody: this.decodeRequestBody(details.requestBody),
-            nonce: requestNonce,
-            requestHeaders: [],
-            responseHeaders: [],
-            statusCode: null,
-            responseBody: null,
-            metadata: {},
-          });
+            const domain = new URL(details.url).hostname;
+            console.debug(`[Auth] Detected auth request: ${details.method} ${domain}${new URL(details.url).pathname}`);
+
+            this.authRequests.set(details.requestId, {
+              id: details.requestId,
+              url: details.url,
+              method: details.method,
+              type: details.type,
+              tabId: details.tabId,
+              timestamp: new Date().toISOString(),
+              requestBody: this.decodeRequestBody(details.requestBody),
+              nonce: requestNonce,
+              requestHeaders: [],
+              responseHeaders: [],
+              statusCode: null,
+              responseBody: null,
+              metadata: {},
+            });
+          }
+        } catch (error) {
+          console.error('[Auth] Error in onBeforeRequest:', error);
         }
       },
       { urls: ["<all_urls>"] },
