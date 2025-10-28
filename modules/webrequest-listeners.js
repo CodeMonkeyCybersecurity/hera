@@ -17,7 +17,9 @@ export class WebRequestListeners {
     decodeRequestBody,
     jwtValidator = null,
     sessionSecurityAnalyzer = null,
-    scimAnalyzer = null
+    scimAnalyzer = null,
+    responseBodyCapturer = null,
+    refreshTokenTracker = null
   ) {
     this.heraReady = heraReady;
     this.authRequests = authRequests;
@@ -30,6 +32,8 @@ export class WebRequestListeners {
     this.jwtValidator = jwtValidator;
     this.sessionSecurityAnalyzer = sessionSecurityAnalyzer;
     this.scimAnalyzer = scimAnalyzer;
+    this.responseBodyCapturer = responseBodyCapturer;
+    this.refreshTokenTracker = refreshTokenTracker;
   }
 
   /**
@@ -95,6 +99,16 @@ export class WebRequestListeners {
               responseBody: null,
               metadata: {},
             });
+
+            // P0-A: Notify response body capturer to attach debugger to this tab
+            // CRITICAL FIX: Add error handling for async operation
+            if (this.responseBodyCapturer && details.tabId >= 0) {
+              this.responseBodyCapturer.handleAuthRequest(details.tabId, details.requestId)
+                .catch(error => {
+                  console.debug('[Auth] Response body capturer attachment failed:', error.message);
+                  // Don't block request processing - response body capture is optional
+                });
+            }
           }
         } catch (error) {
           console.error('[Auth] Error in onBeforeRequest:', error);
@@ -241,10 +255,11 @@ export class WebRequestListeners {
 
   /**
    * 5. onCompleted - Finalize request with session tracking
+   * CRITICAL FIX: Handler is now async to properly await async operations
    */
   registerCompleted() {
     chrome.webRequest.onCompleted.addListener(
-      async (details) => {
+      async (details) => {  // ← Already async
         if (!this.heraReady()) return;
         
         const requestData = this.authRequests.get(details.requestId);
@@ -306,6 +321,10 @@ export class WebRequestListeners {
               requestData.metadata.securityFindings.push(...scimFindings);
             }
           }
+
+          // P0-B: Refresh token rotation tracking
+          // CRITICAL FIX: Tracking now happens in ResponseBodyCapturer BEFORE redaction
+          // No need to track here - findings are already in requestData.metadata.securityFindings
 
           // Get tab information for browser context
           if (details.tabId >= 0) {

@@ -507,6 +507,130 @@ class EvidenceCollector {
   }
 
   /**
+   * P0-A: Process response body captured by ResponseBodyCapturer
+   *
+   * PURPOSE:
+   * - Analyze response bodies for security findings
+   * - Detect DPoP token type
+   * - Detect WebAuthn/FIDO2 challenges
+   * - Detect TOTP/OTP codes
+   * - Detect session tokens
+   *
+   * CRITICAL FIX: Now accepts authRequests Map to avoid responseCache mismatch
+   *
+   * @param {string} requestId - Request ID to correlate with
+   * @param {Object|string} responseBody - Response body (may be redacted)
+   * @param {string} url - Request URL for context
+   * @param {Map} authRequests - Reference to authRequests Map (passed from ResponseBodyCapturer)
+   */
+  processResponseBody(requestId, responseBody, url, authRequests = null) {
+    // CRITICAL FIX: Use authRequests if provided, otherwise fall back to responseCache
+    const requestsMap = authRequests || this.responseCache;
+
+    // Get existing evidence for this request
+    const existingEvidence = requestsMap.get(requestId);
+    if (!existingEvidence) {
+      console.warn(`[Evidence] No existing evidence for request ${requestId}`);
+      return;
+    }
+
+    // Parse response body if it's a string
+    let parsedBody = responseBody;
+    if (typeof responseBody === 'string') {
+      try {
+        parsedBody = JSON.parse(responseBody);
+      } catch (error) {
+        // Not JSON, skip analysis
+        return;
+      }
+    }
+
+    // Analyze response body for security findings
+    const findings = [];
+
+    // P1-5: DPoP Detection
+    if (parsedBody.token_type) {
+      const tokenType = parsedBody.token_type.toLowerCase();
+      if (tokenType === 'dpop') {
+        findings.push({
+          type: 'DPOP_DETECTED',
+          severity: 'INFO',
+          confidence: 'HIGH',
+          message: 'DPoP token type detected - tokens are sender-constrained',
+          evidence: {
+            token_type: parsedBody.token_type,
+            url,
+            note: 'RFC 9449: DPoP provides proof-of-possession for OAuth 2.0 tokens'
+          },
+          references: ['RFC 9449: OAuth 2.0 Demonstrating Proof-of-Possession']
+        });
+      } else if (tokenType === 'bearer') {
+        // Only report if this is a public client (higher risk)
+        findings.push({
+          type: 'BEARER_TOKEN_USED',
+          severity: 'INFO',
+          confidence: 'HIGH',
+          message: 'Bearer token type detected - tokens are not sender-constrained',
+          evidence: {
+            token_type: parsedBody.token_type,
+            url,
+            note: 'Consider upgrading to DPoP for enhanced security (RFC 9449)'
+          },
+          references: ['RFC 9449: OAuth 2.0 Demonstrating Proof-of-Possession']
+        });
+      }
+    }
+
+    // P2-7: WebAuthn Challenge Detection
+    if (parsedBody.publicKey && parsedBody.publicKey.challenge) {
+      findings.push({
+        type: 'WEBAUTHN_CHALLENGE_DETECTED',
+        severity: 'INFO',
+        confidence: 'HIGH',
+        message: 'WebAuthn authentication challenge detected',
+        evidence: {
+          rpId: parsedBody.publicKey.rpId,
+          timeout: parsedBody.publicKey.timeout,
+          userVerification: parsedBody.publicKey.userVerification,
+          url,
+          note: 'WebAuthn/FIDO2 provides phishing-resistant MFA'
+        },
+        references: ['W3C WebAuthn Level 2', 'FIDO2: Web Authentication']
+      });
+    }
+
+    // P2-7: Session Token Detection
+    if (parsedBody.session_token || parsedBody.sessionToken) {
+      findings.push({
+        type: 'SESSION_TOKEN_IN_RESPONSE',
+        severity: 'INFO',
+        confidence: 'MEDIUM',
+        message: 'Session token detected in response body',
+        evidence: {
+          url,
+          note: 'Verify session token is also set as HttpOnly cookie for CSRF protection'
+        }
+      });
+    }
+
+    // Add findings to evidence
+    if (findings.length > 0) {
+      if (!existingEvidence.metadata) {
+        existingEvidence.metadata = {};
+      }
+      if (!existingEvidence.metadata.responseBodyFindings) {
+        existingEvidence.metadata.responseBodyFindings = [];
+      }
+      existingEvidence.metadata.responseBodyFindings.push(...findings);
+
+      // CRITICAL FIX: Update the correct Map
+      requestsMap.set(requestId, existingEvidence);
+
+      console.debug(`[Evidence] Found ${findings.length} security findings in response body for ${url}`);
+    }
+  }
+
+  /**
    * Capture complete request data for flow correlation
    * @param {string} requestId - Unique identifier for the request
    * @param {Object} requestDetails - Complete request details

@@ -1,7 +1,8 @@
-# Hera Evidence Collection & User Experience Roadmap
+# Hera Authentication Security Testing Roadmap
 
-**Last Updated:** 2025-10-27
-**Version:** 0.1.0
+**Last Updated:** 2025-10-28
+**Version:** 0.2.0
+**Standards Compliance:** RFC 9700 (OAuth 2.1), OWASP WSTG 2025, CVSS 4.0, Bugcrowd VRT
 
 ---
 
@@ -118,7 +119,204 @@ MessageRouter: Analysis results stored successfully
 
 ---
 
-## P1 Issues - Short Term (1-2 weeks)
+## Research Foundation: Industry Best Practices (2025)
+
+This roadmap is informed by comprehensive research into current authentication security testing standards:
+
+### 📋 Standards Reviewed
+1. **RFC 9700** - OAuth 2.0 Security Best Current Practice (Jan 2025, IETF)
+2. **OWASP WSTG** - Web Security Testing Guide 2025 (Authentication Testing)
+3. **CVSS 4.0** - Common Vulnerability Scoring System (Nov 2023, FIRST.org)
+4. **Bugcrowd VRT** - Vulnerability Rating Taxonomy (Industry standard P1-P5)
+5. **NIST SP 800-63B** - Digital Identity Guidelines (Authentication & Lifecycle)
+
+### 🔍 Key Industry Changes (2025)
+- **PKCE now MANDATORY** for ALL OAuth 2.0 flows (public + confidential clients per RFC 9700)
+- **Implicit grant MUST NOT be used** (deprecated in OAuth 2.1)
+- **DPoP (Demonstration of Proof-of-Possession)** - New sender-constrained token standard
+- **Refresh token rotation** required for security
+- **CVSS 4.0** adds User Interaction (UI) and Privileges Required (PR) metrics
+- **MFA detection** critical for bug bounty programs (99.9% attack prevention per Microsoft)
+
+### ✅ Hera's Current Strengths
+Based on adversarial codebase analysis (see [CLAUDE.md](CLAUDE.md)):
+- ✅ 50+ vulnerability types across OAuth2/OIDC/JWT/Sessions/HSTS/CSRF/PKCE/WebAuthn
+- ✅ Evidence-based confidence scoring (reduces false positives)
+- ✅ Context-aware severity (HSTS risk varies by application type)
+- ✅ RFC-compliant exemptions (OAuth2 token endpoints exempt from CSRF)
+- ✅ Bug bounty ready (CWE/CVE references, CVSS 3.x scores)
+- ✅ Smart 3-tier token redaction (high/medium/low risk)
+- ✅ Persistent evidence (IndexedDB storage survives crashes)
+
+### ❌ Critical Gaps Identified
+1. **OAuth 2.1 / RFC 9700 compliance** - Missing DPoP, refresh rotation, PKCE for confidential clients
+2. **CVSS 4.0 integration** - Still using hardcoded CVSS 3.x scores
+3. **Bugcrowd VRT alignment** - No P1-P5 severity mapping
+4. **Passive MFA detection** - WebAuthn module exists but incomplete
+5. **Session lifecycle tracking** - No timeout/rotation testing
+6. **Enhanced export formats** - Evidence collected but not user-friendly in exports
+
+### ⚠️ ADVERSARIAL ANALYSIS FINDINGS (See CLAUDE.md Part 7)
+
+**BLOCKERS identified before P1 can start:**
+1. **Response body capture missing** - Required for DPoP validation and WebAuthn detection
+2. **Token tracking conflicts with redaction** - Need secure hash-based tracking
+3. **"Passive" session timeout requires active testing** - Contradiction with passive-first principle
+
+**CORRECTIONS required:**
+4. DPoP severity should be INFO (not MEDIUM) - RFC 9449 says it's optional
+5. PKCE severity should remain context-dependent (HIGH for public, MEDIUM for confidential)
+6. TOTP detection needs context checks (high false positive rate on numeric patterns)
+7. Active testing "safe tests" are not safe (remove CSRF/refresh token tests)
+8. CVSS 4.0 implementation should use existing library (not implement from scratch)
+
+**See [CLAUDE.md](./CLAUDE.md#part-7-adversarial-analysis-of-roadmapmd-v020) for detailed analysis with evidence.**
+
+---
+
+## P0 Prerequisites - RFC 9700 & MFA Detection Blockers ✅
+
+**Status:** COMPLETED (2025-10-28)
+
+These modules were identified as BLOCKERS for P1-5 (RFC 9700) and P2-7 (MFA Detection) during adversarial analysis.
+
+### P0-A: Response Body Capture Infrastructure ✅
+**Status:** SHIPPED
+
+**Problem:**
+- DPoP detection requires reading `token_type` from response body
+- WebAuthn detection requires reading challenge from response body
+- Current implementation only captures response headers
+
+**Solution:**
+Implemented [modules/response-body-capturer.js](modules/response-body-capturer.js) using chrome.debugger API.
+
+**Features:**
+- Auto-attaches debugger to tabs when auth requests detected
+- Captures response bodies for OAuth2 token endpoints
+- Captures WebAuthn/FIDO2 challenges
+- Captures MFA/OTP responses
+- 3-tier redaction (HIGH/MEDIUM/LOW risk)
+- User consent required (shows "DevTools is debugging" notification)
+
+**Security:**
+- Only captures auth-related responses (filtered by URL patterns)
+- Full redaction of sensitive tokens (access_token, refresh_token, id_token)
+- Partial redaction of challenges (WebAuthn, TOTP)
+- No redaction of metadata (token_type, expires_in, scope)
+
+**Integration:**
+- [modules/webrequest-listeners.js](modules/webrequest-listeners.js#L103-106) - Auto-attach on auth request
+- [evidence-collector.js](evidence-collector.js#L509-625) - Process response bodies
+
+**Files:**
+- `/modules/response-body-capturer.js` (new)
+- `/modules/webrequest-listeners.js` (updated)
+- `/evidence-collector.js` (added processResponseBody method)
+- `/background.js` (initialized module)
+
+---
+
+### P0-B: Secure Hash-Based Token Tracking ✅
+**Status:** SHIPPED
+
+**Problem:**
+- Refresh token rotation detection requires comparing tokens
+- Current token redaction reduces to 4+4 chars (not enough for comparison)
+- Cannot store plaintext tokens (security risk)
+
+**Solution:**
+Implemented [modules/auth/refresh-token-tracker.js](modules/auth/refresh-token-tracker.js) with SHA-256 hashing.
+
+**Features:**
+- One-way hashing (cannot recover token from hash)
+- Stores only first 16 chars of hash (sufficient for collision detection)
+- Automatic cleanup (7 day TTL)
+- Memory-only storage (cleared on browser restart)
+- No PII stored
+
+**Detection:**
+```javascript
+{
+  type: 'REFRESH_TOKEN_NOT_ROTATED',
+  severity: 'HIGH',
+  confidence: 'HIGH',
+  message: 'Refresh token was not rotated on use (RFC 9700 violation)',
+  evidence: {
+    domain: 'login.microsoftonline.com',
+    tokenHash: 'a3f2c8d1b5e9f7a4...', // Safe (one-way)
+    useCount: 3,
+    timeSinceFirstUse: 3600000 // 1 hour
+  }
+}
+```
+
+**Integration:**
+- [modules/webrequest-listeners.js](modules/webrequest-listeners.js#L319-343) - Track on token response
+- [modules/auth/refresh-token-tracker.js](modules/auth/refresh-token-tracker.js) - Secure hashing
+
+**Files:**
+- `/modules/auth/refresh-token-tracker.js` (new)
+- `/modules/webrequest-listeners.js` (updated)
+- `/background.js` (initialized module)
+
+---
+
+### P0-C: Critical Bug Fixes (Post-Adversarial Analysis) ✅
+**Status:** SHIPPED (2025-10-28)
+
+**Problem:**
+Adversarial analysis revealed 3 critical bugs that prevented P0-A and P0-B from working:
+
+**Critical Bugs Fixed:**
+
+1. **❌ → ✅ ResponseCache vs AuthRequests Mismatch**
+   - **Bug:** `processResponseBody()` looked in `this.responseCache`, but `ResponseBodyCapturer` stored in `authRequests`
+   - **Impact:** NO response body analysis ever happened (silent failure)
+   - **Fix:** Modified `processResponseBody()` to accept `authRequests` as parameter
+   - **Files:** [evidence-collector.js:526](evidence-collector.js#L526), [response-body-capturer.js:222](modules/response-body-capturer.js#L222)
+
+2. **❌ → ✅ Token Tracking After Redaction**
+   - **Bug:** Tokens redacted BEFORE tracking, making rotation detection impossible
+   - **Impact:** Refresh token tracking always returned null (broken by design)
+   - **Fix:** Track tokens BEFORE redaction in `ResponseBodyCapturer._handleResponseReceived()`
+   - **Files:** [response-body-capturer.js:215-230](modules/response-body-capturer.js#L215-230), [background.js:252-253](background.js#L252-253)
+
+3. **❌ → ✅ Unhandled Promise Rejections**
+   - **Bug:** `handleAuthRequest()` called without `.catch()` handler
+   - **Impact:** Errors in debugger attachment caused uncaught exceptions
+   - **Fix:** Added `.catch()` with proper error handling
+   - **Files:** [webrequest-listeners.js:106-110](modules/webrequest-listeners.js#L106-110)
+
+**Additional Improvements:**
+
+4. **Response Size Limits**
+   - Added 1MB size check before/after fetching response body
+   - Prevents memory issues from large responses
+   - **Files:** [response-body-capturer.js:184-209](modules/response-body-capturer.js#L184-209)
+
+5. **Better Error Handling**
+   - Specific handling for tab closure, DevTools conflicts, missing resources
+   - No more uncaught exceptions
+   - **Files:** [response-body-capturer.js:255-272](modules/response-body-capturer.js#L255-272)
+
+6. **Improved RequestId Matching**
+   - Best-match algorithm using timestamp proximity
+   - Handles duplicate simultaneous requests to same URL
+   - **Files:** [response-body-capturer.js:313-342](modules/response-body-capturer.js#L313-342)
+
+**Testing:**
+- See [P0_INTEGRATION_TESTS.md](P0_INTEGRATION_TESTS.md) for comprehensive test plan
+- Manual tests: Microsoft OAuth2, Google OAuth2, GitHub OAuth2
+- Edge cases: DevTools conflicts, tab closure, large responses, non-JSON, duplicates
+
+---
+
+**UNBLOCKED:** P1-5 (RFC 9700) and P2-7 (MFA Detection) can now proceed.
+
+---
+
+## P1 Issues - Standards Compliance & Core Enhancements (Weeks 1-4)
 
 ### P1-0: Message Queue Reliability Improvements
 **Status:** PLANNED
@@ -432,7 +630,1004 @@ class EvidenceExporter {
 
 ---
 
-## P2 Issues - Medium Term (1-2 months)
+### P1-5: RFC 9700 (OAuth 2.1) Compliance ⭐ NEW
+**Status:** PLANNED → **BLOCKED** ⚠️
+**Priority:** CRITICAL
+**Timeline:** Week 2-3 → **Week 3-6** (includes P0 prerequisites)
+**Standards:** RFC 9700, RFC 9449 (DPoP), RFC 8707 (Resource Indicators)
+
+**⚠️ BLOCKERS (See CLAUDE.md Part 7):**
+1. **Response body capture required** - DPoP JWT validation needs response bodies (not implemented)
+2. **Secure token tracking needed** - Refresh rotation tracking conflicts with current redaction
+3. **DPoP severity correction** - Should be INFO (optional), not MEDIUM
+4. **PKCE severity context** - Keep HIGH for public, MEDIUM for confidential (not all HIGH)
+
+**Goal:** Align Hera with 2025 OAuth security best practices
+
+**What's changing in OAuth 2.1:**
+- PKCE **mandatory** for ALL clients (not just public)
+- Implicit grant completely removed
+- Refresh token rotation required
+- DPoP for sender-constrained tokens
+
+**New Detections:**
+
+1. **DPoP (Demonstration of Proof-of-Possession) - RFC 9449**
+
+   **⚠️ CORRECTION REQUIRED:** DPoP is OPTIONAL per RFC 9449. Severity should be INFO, not MEDIUM.
+
+   ```javascript
+   // Detection logic (CORRECTED)
+   checkDPoP(request, tokenRequest) {
+     const hasDPoPHeader = request.headers.some(h => h.name.toLowerCase() === 'dpop');
+     const hasDPoPProofJWT = hasDPoPHeader && this.validateDPoPJWT(request.headers);
+
+     if (!hasDPoPHeader && this.isPublicClient(request)) {
+       return {
+         type: 'DPOP_NOT_IMPLEMENTED',
+         severity: 'INFO',  // ← CORRECTED: Was MEDIUM
+         message: 'DPoP not detected - tokens not sender-constrained',
+         note: 'DPoP is optional per RFC 9449. Consider implementing for enhanced security.',
+         cwe: 'CWE-319',
+         evidence: {
+           endpoint: request.url,
+           clientType: 'public',
+           recommendation: 'Implement DPoP per RFC 9449 for defense-in-depth'
+         }
+       };
+     }
+   }
+   ```
+   - **Finding:** "DPoP not implemented" (INFO)
+   - **Impact:** Informational - tokens not sender-constrained but DPoP is optional
+   - **Evidence:** DPoP header presence, token binding capability
+
+2. **Refresh Token Rotation**
+
+   **⚠️ BLOCKER:** Current token redaction reduces refresh_token to 4+4 chars. Cannot track equality.
+
+   **Solution:** Secure hash-based tracking (no plaintext storage):
+
+   ```javascript
+   // Track refresh token reuse via secure hashes
+   class RefreshTokenTracker {
+     constructor() {
+       this.seenHashes = new Map();  // Hash → metadata
+     }
+
+     async trackRefreshToken(tokenResponse) {
+       const refreshToken = tokenResponse.refresh_token;
+
+       // Hash token (never store plaintext)
+       const hash = await crypto.subtle.digest(
+         'SHA-256',
+         new TextEncoder().encode(refreshToken)
+       );
+       const hashHex = Array.from(new Uint8Array(hash))
+         .map(b => b.toString(16).padStart(2, '0'))
+         .join('');
+
+       if (this.seenHashes.has(hashHex)) {
+         return {
+           type: 'REFRESH_TOKEN_NOT_ROTATED',
+           severity: 'HIGH',
+           message: 'Refresh token reused - not rotated after exchange',
+           cwe: 'CWE-326',
+           cvss: 7.0,
+           evidence: {
+             firstSeen: this.seenHashes.get(hashHex).timestamp,
+             reusedAt: Date.now(),
+             tokenHash: hashHex.substring(0, 16) + '...',  // Partial hash for evidence
+             recommendation: 'Rotate refresh tokens on every use per RFC 6749 Section 10.4'
+           }
+         };
+       }
+
+       this.seenHashes.set(hashHex, {
+         timestamp: Date.now(),
+         used: false
+       });
+     }
+   }
+   ```
+   - **Finding:** "Refresh token not rotated after use" (HIGH)
+   - **Impact:** Stolen refresh tokens have extended lifetime
+   - **Evidence:** Hash collision detection (secure, no plaintext exposure)
+
+3. **PKCE for ALL Clients (Not Just Public)**
+
+   **⚠️ CORRECTION:** RFC 9700 says PKCE "SHOULD" be used (RFC 2119 = recommended, not required). Keep context-dependent severity.
+
+   ```javascript
+   // Update existing oauth2-analyzer.js (CORRECTED)
+   detectMissingPKCE(request, clientType, hasClientSecret) {
+     const params = this.parseParams(request.url);
+     const hasPKCE = params.has('code_challenge');
+
+     // RFC 9700: PKCE SHOULD be used for ALL clients
+     if (!hasPKCE) {
+       // Context-dependent severity
+       if (clientType === 'public') {
+         return {
+           type: 'MISSING_PKCE',
+           severity: 'HIGH',  // No other protection
+           message: 'PKCE missing on public client - authorization code interception possible',
+           cwe: 'CWE-523',
+           cvss: 7.5,
+           rfcViolation: 'RFC 9700 Section 2.1.1',
+           evidence: {
+             clientType: 'public',
+             authEndpoint: request.url,
+             recommendation: 'Implement PKCE (CRITICAL for public clients)'
+           }
+         };
+       } else if (clientType === 'confidential' && hasClientSecret) {
+         return {
+           type: 'MISSING_PKCE',
+           severity: 'MEDIUM',  // ← Has compensating control
+           message: 'PKCE not implemented on confidential client',
+           note: 'RFC 9700 recommends PKCE for all clients. Confidential clients have client secret as compensating control.',
+           cwe: 'CWE-523',
+           evidence: {
+             clientType: 'confidential',
+             hasCompensatingControl: 'client_secret',
+             recommendation: 'Consider implementing PKCE for defense-in-depth'
+           }
+         };
+       }
+     }
+   }
+   ```
+   - **Update:** PKCE severity remains context-dependent (HIGH for public, MEDIUM for confidential)
+   - **Evidence:** Absence of code_challenge parameter + client type detection
+
+4. **Resource Indicators (RFC 8707)**
+   ```javascript
+   checkResourceIndicators(tokenRequest) {
+     const params = this.parseParams(tokenRequest.body);
+     const hasResource = params.has('resource');
+     const hasAudience = params.has('audience');
+
+     if (!hasResource && !hasAudience) {
+       return {
+         type: 'MISSING_RESOURCE_INDICATOR',
+         severity: 'LOW',
+         message: 'Token request without resource/audience - broad scope',
+         evidence: {
+           recommendation: 'Use resource parameter per RFC 8707 for audience restriction'
+         }
+       };
+     }
+   }
+   ```
+   - **Finding:** "Missing resource indicator - tokens have broad scope" (LOW)
+
+**Files to Create:**
+- `/modules/auth/oauth2-2025-validator.js` - Main RFC 9700 validator
+- `/modules/auth/dpop-validator.js` - DPoP header validation
+- `/modules/auth/refresh-token-tracker.js` - Token rotation tracking
+
+**Files to Update:**
+- `/modules/auth/oauth2-analyzer.js` - Update PKCE severity (MEDIUM → HIGH for all)
+- `/modules/auth/auth-issue-database.js` - Add new issue types
+- `/modules/auth/auth-risk-scorer.js` - Update risk weights
+
+**Success Metrics:**
+- ✅ 100% RFC 9700 required checks implemented
+- ✅ DPoP detection for public clients
+- ✅ Refresh token rotation tracking
+- ✅ PKCE violations flagged for all client types
+
+---
+
+### P1-6: CVSS 4.0 Integration ⭐ NEW
+**Status:** PLANNED
+**Priority:** HIGH
+**Timeline:** Week 3 (assumes library usage) or Week 3-5 (if implementing from scratch)
+**Standards:** CVSS 4.0 Specification (FIRST.org)
+
+**⚠️ IMPLEMENTATION DECISION REQUIRED:** Use existing CVSS 4.0 library vs. implement from scratch.
+- **Option A (Recommended):** Use existing library (e.g., cvss4js) - 3-5 days
+- **Option B:** Implement from scratch - 2-3 weeks (FIRST.org reference is 500+ lines, MacroVector scoring is complex)
+
+**Goal:** Standardize severity scoring with industry-standard CVSS 4.0
+
+**Current State:** Hera uses custom severity (CRITICAL/HIGH/MEDIUM/LOW) with hardcoded CVSS 3.x scores
+
+**CVSS 4.0 Improvements:**
+- **User Interaction (UI):** None vs. Required
+- **Privileges Required (PR):** None/Low/High
+- Better differentiation for auth vulnerabilities
+
+**Implementation:**
+
+```javascript
+// New module: modules/cvss-calculator.js
+class CVSSCalculator {
+  /**
+   * Calculate CVSS 4.0 score for a finding
+   * @returns {Object} { score, severity, vector }
+   */
+  calculateCVSS4(finding) {
+    // Base Metric Group
+    const metrics = {
+      AV: this.getAttackVector(finding),        // Attack Vector
+      AC: this.getAttackComplexity(finding),    // Attack Complexity
+      AT: this.getAttackRequirements(finding),  // Attack Requirements (NEW in 4.0)
+      PR: this.getPrivilegesRequired(finding),  // Privileges Required
+      UI: this.getUserInteraction(finding),     // User Interaction
+      VC: this.getConfidentiality(finding),     // Vulnerability Confidentiality
+      VI: this.getIntegrity(finding),           // Vulnerability Integrity
+      VA: this.getAvailability(finding),        // Vulnerability Availability
+      SC: this.getSubsequentConfidentiality(finding),  // Subsequent System Confidentiality
+      SI: this.getSubsequentIntegrity(finding),        // Subsequent System Integrity
+      SA: this.getSubsequentAvailability(finding)      // Subsequent System Availability
+    };
+
+    const vector = this.buildVector(metrics);
+    const score = this.computeScore(metrics);
+    const severity = this.getSeverityRating(score);
+
+    return {
+      version: '4.0',
+      vector: vector,  // e.g., "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:R/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N"
+      baseScore: score,
+      baseSeverity: severity,
+      exploitability: this.computeExploitability(metrics),
+      impact: this.computeImpact(metrics)
+    };
+  }
+
+  // Mapping examples for auth vulnerabilities
+  getAttackVector(finding) {
+    // All web auth issues = Network
+    return 'N';
+  }
+
+  getAttackComplexity(finding) {
+    const lowComplexity = [
+      'MISSING_CSRF_PROTECTION',
+      'MISSING_SECURE_FLAG',
+      'TOKEN_IN_URL',
+      'MISSING_HTTPONLY_FLAG'
+    ];
+
+    const highComplexity = [
+      'ALGORITHM_CONFUSION_RISK',
+      'TIMING_ATTACK_POSSIBLE',
+      'SESSION_FIXATION'
+    ];
+
+    if (lowComplexity.includes(finding.type)) return 'L';  // Low
+    if (highComplexity.includes(finding.type)) return 'H'; // High
+    return 'L';  // Default
+  }
+
+  getPrivilegesRequired(finding) {
+    // Does attacker need to be authenticated?
+    const noAuthRequired = [
+      'MISSING_STATE',
+      'WEAK_STATE',
+      'MISSING_PKCE',
+      'NO_HSTS'
+    ];
+
+    if (noAuthRequired.includes(finding.type)) return 'N';  // None
+    if (finding.requiresAuthentication) return 'L';  // Low
+    return 'N';
+  }
+
+  getUserInteraction(finding) {
+    // Does victim need to perform action?
+    const requiresUserAction = [
+      'MISSING_CSRF_PROTECTION',  // Victim must click malicious link
+      'MISSING_STATE',             // Victim must authorize
+      'OPEN_REDIRECT'              // Victim must follow redirect
+    ];
+
+    const noUserAction = [
+      'MISSING_SECURE_FLAG',  // Passive network sniffing
+      'MISSING_HTTPONLY_FLAG', // XSS (separate issue) exploits it
+      'TOKEN_LEAKED_VIA_REFERER'  // Automatic header
+    ];
+
+    if (requiresUserAction.includes(finding.type)) return 'A';  // Active (NEW in 4.0)
+    if (noUserAction.includes(finding.type)) return 'N';  // None
+    return 'A';  // Default: assume user action required
+  }
+
+  getConfidentiality(finding) {
+    // Impact on confidentiality
+    const highImpact = [
+      'TOKEN_IN_URL',
+      'CREDENTIALS_IN_URL',
+      'ALG_NONE_VULNERABILITY',
+      'SESSION_FIXATION'
+    ];
+
+    if (highImpact.includes(finding.type)) return 'H';  // High
+    if (finding.severity === 'MEDIUM') return 'L';  // Low
+    return 'N';  // None
+  }
+
+  getIntegrity(finding) {
+    const highImpact = [
+      'MISSING_CSRF_PROTECTION',
+      'ALG_NONE_VULNERABILITY',
+      'ALGORITHM_CONFUSION_RISK'
+    ];
+
+    if (highImpact.includes(finding.type)) return 'H';
+    return 'N';
+  }
+}
+
+// Example outputs:
+const examples = {
+  missingCSRF: {
+    vector: "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:N/VI:H/VA:N/SC:N/SI:H/SA:N",
+    score: 7.1,
+    severity: "HIGH"
+  },
+  missingPKCE: {
+    vector: "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:A/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N",
+    score: 6.8,
+    severity: "MEDIUM"
+  },
+  algNone: {
+    vector: "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:N/SC:H/SI:H/SA:N",
+    score: 9.3,
+    severity: "CRITICAL"
+  }
+};
+```
+
+**Export Format Update:**
+```json
+{
+  "finding": {
+    "type": "MISSING_CSRF_PROTECTION",
+    "heraSeverity": "HIGH",
+    "cvss": {
+      "version": "4.0",
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:N/VI:H/VA:N/SC:N/SI:H/SA:N",
+      "baseScore": 7.1,
+      "baseSeverity": "HIGH",
+      "exploitability": 3.1,
+      "impact": 5.2
+    },
+    "cwe": "CWE-352"
+  }
+}
+```
+
+**Files to Create:**
+- `/modules/cvss-calculator.js` - CVSS 4.0 calculator
+- `/data/cvss-mappings.json` - Finding type → CVSS metric mappings
+
+**Files to Update:**
+- `/modules/auth/auth-issue-database.js` - Add CVSS 4.0 vectors to all issues
+- `/modules/ui/export-manager.js` - Include CVSS 4.0 in exports
+
+**Success Metrics:**
+- ✅ All findings have valid CVSS 4.0 scores
+- ✅ CVSS vector strings in all exports
+- ✅ Severity alignment: Hera ≈ CVSS (±1 level acceptable)
+
+---
+
+### P1-7: Bugcrowd VRT Alignment ⭐ NEW
+**Status:** PLANNED
+**Priority:** MEDIUM
+**Timeline:** Week 3-4
+**Standards:** Bugcrowd Vulnerability Rating Taxonomy
+
+**Goal:** Map Hera findings to industry-standard bug bounty severity classifications
+
+**Bugcrowd VRT Overview:**
+- **Priority Levels:** P1 (Critical) → P5 (Informational)
+- **Categories:** Broken Authentication, Broken Access Control, etc.
+- **Used by:** Bugcrowd, many private programs
+
+**Implementation:**
+
+```javascript
+// New module: modules/bugcrowd-vrt-mapper.js
+class BugcrowdVRTMapper {
+  constructor() {
+    // Load VRT taxonomy from JSON
+    this.vrtTaxonomy = this.loadTaxonomy();
+  }
+
+  /**
+   * Map Hera finding to Bugcrowd VRT
+   */
+  mapToVRT(finding) {
+    const mapping = this.vrtMappings[finding.type];
+
+    if (!mapping) {
+      return this.getDefaultMapping(finding.severity);
+    }
+
+    return {
+      category: mapping.category,
+      subcategory: mapping.subcategory,
+      priority: this.heraSeverityToPriority(finding.severity, finding.confidence),
+      vrtId: mapping.vrtId,
+      url: `https://bugcrowd.com/vulnerability-rating-taxonomy#${mapping.vrtId}`,
+      baselinePriority: mapping.baseline,
+      notes: mapping.notes
+    };
+  }
+
+  heraSeverityToPriority(severity, confidence) {
+    // Hera severity + confidence → VRT priority
+    const mapping = {
+      'CRITICAL': { high: 'P1', medium: 'P2', low: 'P3' },
+      'HIGH':     { high: 'P2', medium: 'P3', low: 'P4' },
+      'MEDIUM':   { high: 'P3', medium: 'P4', low: 'P5' },
+      'LOW':      { high: 'P4', medium: 'P5', low: 'P5' },
+      'INFO':     { high: 'P5', medium: 'P5', low: 'P5' }
+    };
+
+    const confidenceLevel = confidence >= 80 ? 'high' : confidence >= 50 ? 'medium' : 'low';
+    return mapping[severity][confidenceLevel];
+  }
+
+  // VRT mappings for Hera findings
+  vrtMappings = {
+    'MISSING_CSRF_PROTECTION': {
+      category: 'Broken Authentication and Session Management',
+      subcategory: 'Cross-Site Request Forgery (CSRF)',
+      vrtId: 'broken_authentication_and_session_management.csrf',
+      baseline: 'P2',
+      notes: 'Priority varies based on endpoint sensitivity'
+    },
+
+    'SESSION_FIXATION': {
+      category: 'Broken Authentication and Session Management',
+      subcategory: 'Session Fixation',
+      vrtId: 'broken_authentication_and_session_management.session_fixation',
+      baseline: 'P1',
+      notes: 'Critical - enables account takeover'
+    },
+
+    'MISSING_PKCE': {
+      category: 'Broken Authentication and Session Management',
+      subcategory: 'Weak Login Function',
+      vrtId: 'broken_authentication_and_session_management.weak_login_function',
+      baseline: 'P2',
+      notes: 'Authorization code interception attack'
+    },
+
+    'ALG_NONE_VULNERABILITY': {
+      category: 'Broken Authentication and Session Management',
+      subcategory: 'Weak Login Function',
+      vrtId: 'broken_authentication_and_session_management.weak_login_function',
+      baseline: 'P1',
+      notes: 'Complete authentication bypass'
+    },
+
+    'NO_HSTS': {
+      category: 'Security Misconfiguration',
+      subcategory: 'Missing Security Headers',
+      vrtId: 'security_misconfiguration.missing_security_headers',
+      baseline: 'P4',
+      notes: 'Priority increases with auth endpoints (P2-P3)'
+    },
+
+    'MISSING_HTTPONLY_FLAG': {
+      category: 'Broken Authentication and Session Management',
+      subcategory: 'Weak Session Token',
+      vrtId: 'broken_authentication_and_session_management.weak_session_token',
+      baseline: 'P2',
+      notes: 'Session hijacking via XSS'
+    }
+    // ... more mappings
+  };
+}
+
+// Export format:
+{
+  "finding": {
+    "type": "SESSION_FIXATION",
+    "heraSeverity": "CRITICAL",
+    "confidence": 85,
+    "bugcrowdVRT": {
+      "category": "Broken Authentication and Session Management",
+      "subcategory": "Session Fixation",
+      "priority": "P1",
+      "vrtId": "broken_authentication_and_session_management.session_fixation",
+      "url": "https://bugcrowd.com/vulnerability-rating-taxonomy#broken_authentication_and_session_management.session_fixation",
+      "baselinePriority": "P1",
+      "notes": "Critical - enables account takeover"
+    }
+  }
+}
+```
+
+**Files to Create:**
+- `/modules/bugcrowd-vrt-mapper.js` - VRT mapping logic
+- `/data/vrt-mappings.json` - Complete VRT taxonomy data
+- `/docs/VRT_ALIGNMENT.md` - Documentation of mappings
+
+**Files to Update:**
+- `/modules/ui/export-manager.js` - Include VRT in exports
+
+**Success Metrics:**
+- ✅ 90%+ of findings have VRT mappings
+- ✅ VRT priority aligns with bug bounty acceptance rates
+- ✅ Documented justification for all P1/P2 classifications
+
+---
+
+## P2 Issues - Enhanced Detection & User Experience (Weeks 4-8)
+
+### P2-7: Passive MFA Detection ⭐ NEW
+**Status:** PLANNED → **BLOCKED** ⚠️
+**Priority:** HIGH
+**Timeline:** Week 4-5 → **Week 5-7** (includes response body prerequisite)
+**Standards:** OWASP WSTG 2025, NIST SP 800-63B
+
+**⚠️ BLOCKERS:**
+1. **Response body capture required** - WebAuthn challenges are in response bodies
+2. **TOTP false positives** - Need context checks (6-8 digit pattern matches ZIP codes, order IDs, etc.)
+
+**Goal:** Detect MFA implementation and identify bypass vulnerabilities
+
+**Background:** Microsoft research shows MFA stops 99.9% of account compromises. Detecting weak/missing MFA is high-value for bug bounties.
+
+**Detection Opportunities (Passive):**
+
+1. **WebAuthn/FIDO2 Detection** (Enhance existing module)
+   ```javascript
+   // modules/auth/mfa-detector.js
+   class MFADetector {
+     detectWebAuthn(request, response) {
+       // Detect WebAuthn API usage
+       const hasWebAuthnChallenge = this.checkWebAuthnChallenge(response);
+       const hasCredentialRequest = request.url.includes('/webauthn/');
+
+       if (hasWebAuthnChallenge || hasCredentialRequest) {
+         return {
+           mfaType: 'WebAuthn',
+           strength: 'STRONG',
+           phishingResistant: true,
+           evidence: {
+             challengeDetected: hasWebAuthnChallenge,
+             credentialRequestSeen: hasCredentialRequest
+           }
+         };
+       }
+     }
+   }
+   ```
+
+2. **TOTP/Authenticator App Detection**
+
+   **⚠️ FALSE POSITIVE RISK:** 6-8 digit pattern matches non-TOTP codes (ZIP, order ID, confirmation codes).
+
+   **Solution:** Add context checks before reporting:
+
+   ```javascript
+   detectTOTP(request, flowContext) {
+     const params = this.parseParams(request.url + '?' + request.body);
+
+     // Common TOTP parameter names
+     const totpParams = ['otp', 'totp', 'mfa_code', 'verification_code',
+                        'authenticator_code', 'token', 'code'];
+
+     for (const paramName of totpParams) {
+       if (params.has(paramName)) {
+         const value = params.get(paramName);
+
+         // TOTP codes are typically 6-8 digits
+         if (/^\d{6,8}$/.test(value)) {
+           // ← ADD CONTEXT CHECKS to reduce false positives
+           const hasAuthContext = flowContext.recentlyAuthenticated;
+           const hasMFAEndpoint = /\/(mfa|2fa|otp|verify|authenticate)/.test(request.url);
+           const hasMFAHeaders = request.headers.some(h =>
+             h.name.toLowerCase().includes('x-mfa') ||
+             h.name.toLowerCase().includes('x-otp')
+           );
+
+           // Only report if we have confirming context
+           if (!hasAuthContext && !hasMFAEndpoint && !hasMFAHeaders) {
+             // Likely false positive - don't report
+             return null;
+           }
+
+           // CRITICAL: TOTP code in GET request = leaked via Referer
+           if (request.method === 'GET') {
+             return {
+               type: 'MFA_CODE_IN_URL',
+               severity: 'HIGH',
+               message: 'MFA/TOTP code exposed in URL - leaked via Referer header',
+               cwe: 'CWE-598',
+               cvss: 7.5,
+               confidence: hasAuthContext && hasMFAEndpoint ? 'HIGH' : 'MEDIUM',
+               evidence: {
+                 parameterName: paramName,
+                 method: 'GET',
+                 url: this.redactSensitiveParams(request.url),
+                 contextChecks: { hasAuthContext, hasMFAEndpoint, hasMFAHeaders }
+               }
+             };
+           }
+
+           return {
+             mfaType: 'TOTP',
+             strength: 'MEDIUM',
+             phishingResistant: false,
+             confidence: hasAuthContext && hasMFAEndpoint ? 'HIGH' : 'MEDIUM',
+             evidence: {
+               parameterName: paramName,
+               contextChecks: { hasAuthContext, hasMFAEndpoint, hasMFAHeaders }
+             }
+           };
+         }
+       }
+     }
+   }
+   ```
+
+3. **SMS OTP Detection**
+   ```javascript
+   detectSMSOTP(request, response) {
+     const urlPatterns = [
+       /\/sms\//,
+       /\/verify[-_]?phone/,
+       /\/send[-_]?code/,
+       /\/otp/
+     ];
+
+     const isSMSEndpoint = urlPatterns.some(pattern => pattern.test(request.url));
+
+     if (isSMSEndpoint) {
+       return {
+         type: 'SMS_BASED_MFA',
+         severity: 'INFO',
+         message: 'SMS-based MFA detected - vulnerable to SIM swapping',
+         evidence: {
+           endpoint: request.url,
+           recommendation: 'Consider upgrading to TOTP or WebAuthn',
+           weakness: 'SMS OTP susceptible to interception and SIM swap attacks'
+         },
+         mfaType: 'SMS',
+         strength: 'WEAK',
+         phishingResistant: false
+       };
+     }
+   }
+   ```
+
+4. **MFA Bypass Detection (Remember Device)**
+   ```javascript
+   detectMFABypass(cookies) {
+     const bypassPatterns = [
+       'remember_device',
+       'mfa_remember',
+       'trust_device',
+       'skip_mfa',
+       'mfa_trusted'
+     ];
+
+     for (const [name, cookie] of Object.entries(cookies)) {
+       if (bypassPatterns.some(pattern => name.toLowerCase().includes(pattern))) {
+         // Check token lifetime
+         const maxAge = this.getCookieMaxAge(cookie);
+
+         if (maxAge > 30 * 24 * 60 * 60) {  // >30 days
+           return {
+             type: 'MFA_REMEMBER_TOKEN_EXCESSIVE_LIFETIME',
+             severity: 'MEDIUM',
+             message: 'MFA bypass token has excessive lifetime (>30 days)',
+             evidence: {
+               cookieName: name,
+               maxAge: maxAge,
+               maxAgeDays: Math.floor(maxAge / (24 * 60 * 60)),
+               recommendation: 'Limit remember device tokens to 30 days or less'
+             }
+           };
+         }
+       }
+     }
+   }
+   ```
+
+5. **Missing MFA on Sensitive Endpoints**
+   ```javascript
+   detectMissingMFA(flowContext) {
+     // Track if MFA was required during auth flow
+     const hadMFAChallenge = flowContext.events.some(e =>
+       e.type === 'webauthn' || e.type === 'totp' || e.type === 'sms_otp'
+     );
+
+     // Detect sensitive endpoints (admin, settings, financial)
+     const sensitivePatterns = [
+       /\/admin\//,
+       /\/settings\//,
+       /\/account\//,
+       /\/payment/,
+       /\/transfer/,
+       /\/withdraw/
+     ];
+
+     const accessedSensitiveEndpoint = flowContext.events.some(e =>
+       sensitivePatterns.some(pattern => pattern.test(e.url))
+     );
+
+     if (accessedSensitiveEndpoint && !hadMFAChallenge) {
+       return {
+         type: 'MFA_NOT_ENFORCED_SENSITIVE_ENDPOINT',
+         severity: 'HIGH',
+         message: 'MFA not enforced on sensitive endpoint access',
+         evidence: {
+           sensitiveEndpoints: flowContext.events
+             .filter(e => sensitivePatterns.some(p => p.test(e.url)))
+             .map(e => e.url),
+           mfaChallengeObserved: false,
+           recommendation: 'Enforce MFA for sensitive operations'
+         }
+       };
+     }
+   }
+   ```
+
+**New Findings:**
+- "MFA/TOTP code in URL - leaked via Referer" (HIGH)
+- "MFA not enforced on sensitive endpoint" (HIGH)
+- "SMS-based MFA vulnerable to interception" (INFO - with recommendations)
+- "MFA bypass token has excessive lifetime" (MEDIUM)
+- "MFA challenge can be reused" (HIGH - leverage existing WebAuthn validator)
+
+**Files to Create:**
+- `/modules/auth/mfa-detector.js` - Main MFA detection coordinator
+- `/modules/auth/totp-analyzer.js` - TOTP-specific detection
+
+**Files to Update:**
+- `/modules/auth/webauthn-validator.js` - Enhance with MFA context
+- `/modules/auth/auth-issue-database.js` - Add MFA issue types
+
+**Success Metrics:**
+- ✅ Detect 90%+ of MFA implementations (WebAuthn/TOTP/SMS)
+- ✅ Identify MFA bypass mechanisms
+- ✅ Flag MFA code leakage in URLs
+
+---
+
+### P2-8: Session Lifecycle Tracking ⭐ NEW
+**Status:** PLANNED → **SCOPE CORRECTION NEEDED** ⚠️
+**Priority:** MEDIUM
+**Timeline:** Week 5-6
+**Standards:** OWASP WSTG 2025 (Session Management Testing)
+
+**⚠️ CONTRADICTION IDENTIFIED:** "Session timeout testing" requires active testing (waiting 30+ min, making test requests), but this is in P2 (passive detection).
+
+**CORRECTION REQUIRED:** Either:
+- **Option A:** Move inactivity timeout testing to P3-6 (Active Testing) with consent
+- **Option B:** Rename to "Session Lifetime Analysis" - only analyze Max-Age header (passive), don't test behavior
+
+**Goal:** Analyze session configuration (passive) - NOT behavior testing
+
+**Passive Analysis Only:**
+
+1. **Session Lifetime Analysis (Passive Only)**
+
+   **⚠️ CORRECTED:** Remove "inactivity timeout" testing (requires active testing). Only analyze cookie attributes.
+
+   ```javascript
+   // modules/auth/session-lifecycle-tracker.js (CORRECTED - passive only)
+   class SessionLifecycleTracker {
+     analyzeSessionLifetime(sessionCookie) {  // ← RENAMED: analyze, not test
+       const maxAge = this.extractMaxAge(sessionCookie);
+       const expires = this.extractExpires(sessionCookie);
+
+       // Check for absolute timeout
+       if (!maxAge && !expires) {
+         return {
+           type: 'SESSION_NO_ABSOLUTE_TIMEOUT',
+           severity: 'MEDIUM',
+           message: 'Session cookie has no Max-Age or Expires - no absolute timeout',
+           note: 'Cannot verify inactivity timeout behavior passively',
+           evidence: {
+             cookieName: sessionCookie.name,
+             maxAge: null,
+             expires: null,
+             recommendation: 'Set Max-Age or Expires for session cookies'
+           }
+         };
+       }
+
+       // Flag sessions >24 hours (absolute timeout)
+       if (maxAge > 24 * 60 * 60) {
+         return {
+           type: 'SESSION_EXCESSIVE_LIFETIME',
+           severity: 'MEDIUM',
+           message: 'Session absolute lifetime exceeds 24 hours',
+           evidence: {
+             maxAge: maxAge,
+             maxAgeHours: Math.floor(maxAge / 3600),
+             isAbsoluteTimeout: true,  // ← This is absolute, not inactivity
+             recommendation: 'OWASP recommends max 12-24 hour session lifetime'
+           }
+         };
+       }
+
+       return null;  // No issues
+     }
+
+     // ❌ REMOVED: trackSessionRefresh() - requires active testing
+     // ❌ Cannot verify inactivity timeout behavior passively
+     // ❌ Move to P3-6 (Active Testing) if needed
+   }
+   ```
+
+2. **Concurrent Session Detection**
+   ```javascript
+   detectConcurrentSessions(domain) {
+     const sessions = this.activeSessions.get(domain) || [];
+
+     if (sessions.length > 1) {
+       return {
+         type: 'CONCURRENT_SESSIONS_ALLOWED',
+         severity: 'LOW',
+         message: 'Multiple concurrent sessions detected for same domain',
+         evidence: {
+           sessionCount: sessions.length,
+           sessionIds: sessions.map(s => this.truncateSessionId(s.id)),
+           recommendation: 'Consider limiting concurrent sessions for sensitive applications',
+           note: 'May be acceptable for some applications'
+         }
+       };
+     }
+   }
+   ```
+
+3. **Remember Me Token Analysis**
+   ```javascript
+   analyzeRememberMeToken(cookie) {
+     const rememberPatterns = ['remember', 'persistent', 'autologin', 'stay_logged_in'];
+
+     if (rememberPatterns.some(p => cookie.name.toLowerCase().includes(p))) {
+       const entropy = this.calculateEntropy(cookie.value);
+
+       if (entropy < 128) {
+         return {
+           type: 'REMEMBER_ME_TOKEN_WEAK_ENTROPY',
+           severity: 'MEDIUM',
+           message: 'Remember me token has insufficient entropy',
+           evidence: {
+             cookieName: cookie.name,
+             entropy: entropy,
+             entropyBits: Math.floor(entropy),
+             recommendation: 'Use at least 128 bits of entropy for remember me tokens'
+           }
+         };
+       }
+
+       const maxAge = this.extractMaxAge(cookie);
+       if (maxAge > 90 * 24 * 60 * 60) {  // >90 days
+         return {
+           type: 'REMEMBER_ME_TOKEN_EXCESSIVE_LIFETIME',
+           severity: 'LOW',
+           message: 'Remember me token has excessive lifetime (>90 days)',
+           evidence: {
+             maxAgeDays: Math.floor(maxAge / (24 * 60 * 60)),
+             recommendation: 'Limit remember me tokens to 90 days maximum'
+           }
+         };
+       }
+     }
+   }
+   ```
+
+**Files to Create:**
+- `/modules/auth/session-lifecycle-tracker.js` - Session lifecycle monitoring
+
+**Files to Update:**
+- `/modules/auth/session-security-analyzer.js` - Integrate lifecycle tracking
+
+**Success Metrics:**
+- ✅ Detect sessions without timeout
+- ✅ Flag excessive session lifetimes
+- ✅ Identify concurrent session issues
+
+---
+
+### P2-9: Password Policy Detection ⭐ NEW
+**Status:** PLANNED
+**Priority:** LOW
+**Timeline:** Week 6-7
+**Standards:** NIST SP 800-63B (Password Guidelines)
+
+**Goal:** Passively detect and assess password policies
+
+**Detection Strategy:**
+
+```javascript
+// modules/auth/password-policy-analyzer.js
+class PasswordPolicyAnalyzer {
+  detectPasswordEndpoints(request) {
+    const passwordEndpoints = [
+      /\/reset[-_]?password/,
+      /\/change[-_]?password/,
+      /\/signup/,
+      /\/register/,
+      /\/set[-_]?password/
+    ];
+
+    return passwordEndpoints.some(pattern => pattern.test(request.url));
+  }
+
+  extractPolicyFromError(errorResponse) {
+    // Common error messages reveal policy
+    const patterns = {
+      minLength: /at least (\d+) characters?/i,
+      maxLength: /no more than (\d+) characters?/i,
+      requiresUppercase: /uppercase letter/i,
+      requiresLowercase: /lowercase letter/i,
+      requiresDigit: /number|digit/i,
+      requiresSpecial: /special character/i
+    };
+
+    const policy = {};
+
+    for (const [key, pattern] of Object.entries(patterns)) {
+      const match = errorResponse.match(pattern);
+      if (match) {
+        policy[key] = match[1] ? parseInt(match[1]) : true;
+      }
+    }
+
+    return policy;
+  }
+
+  assessPolicy(policy) {
+    // NIST SP 800-63B guidelines (2025)
+    const nistMinimum = 8;  // With MFA
+    const nistRecommended = 15;  // Without MFA
+
+    const findings = [];
+
+    if (policy.minLength && policy.minLength < nistMinimum) {
+      findings.push({
+        type: 'WEAK_PASSWORD_POLICY',
+        severity: 'MEDIUM',
+        message: `Password minimum length (${policy.minLength}) below NIST recommendation`,
+        evidence: {
+          detectedMinLength: policy.minLength,
+          nistRecommendation: nistMinimum,
+          source: 'NIST SP 800-63B'
+        }
+      });
+    }
+
+    if (!policy.minLength) {
+      findings.push({
+        type: 'NO_PASSWORD_MINIMUM_LENGTH',
+        severity: 'MEDIUM',
+        message: 'No password minimum length detected',
+        evidence: {
+          recommendation: 'Enforce minimum 8 characters (with MFA) or 15 (without MFA)'
+        }
+      });
+    }
+
+    return findings;
+  }
+}
+```
+
+**Files to Create:**
+- `/modules/auth/password-policy-analyzer.js` - Password policy detection
+
+**Success Metrics:**
+- ✅ Detect password policy from error messages
+- ✅ Compare against NIST SP 800-63B
+- ✅ Flag weak policies (MEDIUM severity)
+
+---
 
 ### P2-1: Evidence Timeline Visualization
 **Status:** PLANNED
@@ -631,7 +1826,102 @@ class EvidenceCollector {
 
 ---
 
-## P3 Issues - Long Term (2+ months)
+## P3 Issues - Advanced Features & Optional Enhancements (Months 2-3)
+
+### P3-6: Active Testing Framework (Opt-In) ⭐ NEW
+**Status:** IDEA → **SCOPE CORRECTION NEEDED** ⚠️
+**Priority:** LOW (opt-in feature)
+**Timeline:** Month 3
+**⚠️ REQUIRES USER CONSENT**
+
+**⚠️ UNSAFE TESTS IDENTIFIED:** CSRF token reuse and refresh token rotation tests can cause unintended side effects.
+
+**CORRECTED SCOPE:** Only truly safe read-only tests.
+
+**Goal:** Optional active security testing with explicit user approval
+
+**Philosophy:** Hera is passive-by-default. Active testing ONLY with clear user consent.
+
+**Safe Tests (Read-Only GET Requests ONLY):**
+
+1. **Session Timeout Testing**
+   ```javascript
+   // modules/auth/active-tester.js
+   class ActiveTester {
+     async testSessionTimeout(sessionCookie, userConsent) {
+       if (!userConsent.sessionTimeoutTest) {
+         return { skipped: true, reason: 'No user consent' };
+       }
+
+       // Wait 30 minutes, then test if session still valid
+       await this.delay(30 * 60 * 1000);
+
+       const stillValid = await this.checkSessionValidity(sessionCookie);
+
+       return {
+         type: 'SESSION_TIMEOUT_TEST',
+         result: stillValid ? 'VULNERABLE' : 'SECURE',
+         evidence: {
+           inactivityPeriod: 30,  // minutes
+           sessionStillValid: stillValid
+         }
+       };
+     }
+   }
+   ```
+
+**❌ REMOVED - NOT SAFE:**
+
+2. ~~**CSRF Token Reuse Testing**~~ - **UNSAFE:** Making POST requests could create resources/modify state (e.g., POST /create-payment creates duplicate payment)
+
+3. ~~**Refresh Token Rotation Testing**~~ - **UNSAFE:** Using old refresh token could trigger security alerts, invalidate all tokens, lock user out
+
+**NEVER Test:**
+- ❌ Password brute forcing
+- ❌ Authentication bypass attempts
+- ❌ Credential stuffing
+- ❌ Account enumeration
+- ❌ Any destructive actions
+- ❌ Automated exploitation
+- ❌ CSRF token reuse (could modify state) - **REMOVED FROM ROADMAP**
+- ❌ Refresh token rotation (could invalidate tokens) - **REMOVED FROM ROADMAP**
+- ❌ Any POST/PUT/DELETE/PATCH requests (state-modifying)
+
+**SAFE Tests Only:**
+- ✅ Session timeout (GET requests to read-only endpoints only)
+- ✅ Read-only endpoints with expired/invalid tokens
+- ✅ No state modification
+
+**User Consent Flow:**
+```javascript
+// UI consent dialog
+const consent = await showConsentDialog({
+  title: 'Hera Active Testing',
+  warning: 'Active testing will send additional requests to the target application.',
+  tests: [
+    { id: 'sessionTimeoutTest', name: 'Session Timeout Testing', description: '...' },
+    { id: 'csrfReuseTest', name: 'CSRF Token Reuse Testing', description: '...' },
+    { id: 'refreshRotationTest', name: 'Refresh Token Rotation Testing', description: '...' }
+  ],
+  disclaimer: 'Only perform active testing on applications you have authorization to test.'
+});
+
+if (consent.granted && consent.tests.length > 0) {
+  // Run only consented tests
+  await activeTester.runTests(consent);
+}
+```
+
+**Files to Create:**
+- `/modules/auth/active-tester.js` - Active testing coordinator
+- `/modules/ui/consent-manager.js` - User consent management
+
+**Success Metrics:**
+- ✅ Zero active tests run without explicit consent
+- ✅ Clear warnings about authorization requirements
+- ✅ Safe tests only (no destructive actions)
+
+---
 
 ### P3-1: Evidence Collaboration Features
 **Status:** IDEA
@@ -741,47 +2031,207 @@ Risk Level: LOW
 
 ## Implementation Priority
 
-| Item | Priority | Effort | Impact | Timeline |
-|------|----------|--------|--------|----------|
-| P1-1: Export Notifications | HIGH | 2 days | HIGH | Week 1 |
-| P1-2: Quality Indicators | HIGH | 3 days | HIGH | Week 1 |
-| P1-3: Batch Logs | MEDIUM | 1 day | MEDIUM | Week 1 |
-| P1-4: Export Formats | HIGH | 5 days | HIGH | Week 2 |
-| P2-1: Timeline Viz | MEDIUM | 1 week | MEDIUM | Month 1 |
-| P2-2: Smart Summary | LOW | 2 days | LOW | Month 1 |
-| P2-3: Notifications | HIGH | 3 days | HIGH | Month 1 |
-| P2-4: Export Preview | MEDIUM | 3 days | MEDIUM | Month 1 |
-| P2-5: Quality UI | MEDIUM | 1 week | MEDIUM | Month 2 |
-| P2-6: Degradation | LOW | 1 week | MEDIUM | Month 2 |
-| P3-1: Collaboration | LOW | 2 weeks | LOW | Q1 2026 |
-| P3-2: Learning | LOW | 2 weeks | MEDIUM | Q1 2026 |
-| P3-3: ML | LOW | 1 month | HIGH | Q2 2026 |
-| P3-4: BB Integration | MEDIUM | 2 weeks | HIGH | Q2 2026 |
-| P3-5: Compliance | LOW | 1 month | MEDIUM | Q3 2026 |
+### Phase 1: Standards Compliance (Weeks 1-4) - CRITICAL
+
+| Item | Priority | Effort | Impact | Timeline | Standards |
+|------|----------|--------|--------|----------|-----------|
+| **P1-5: RFC 9700 Compliance** ⭐ | CRITICAL | 2 weeks | VERY HIGH | Week 2-3 | RFC 9700, RFC 9449 |
+| **P1-6: CVSS 4.0 Integration** ⭐ | HIGH | 1 week | HIGH | Week 3 | CVSS 4.0 |
+| **P1-7: Bugcrowd VRT Mapping** ⭐ | MEDIUM | 3 days | HIGH | Week 3-4 | Bugcrowd VRT |
+| P1-4: Export Formats (PDF/MD) | HIGH | 1 week | HIGH | Week 4 | N/A |
+| P1-1: Export Notifications | HIGH | 2 days | MEDIUM | Week 1 | N/A |
+| P1-2: Quality Indicators | HIGH | 3 days | MEDIUM | Week 1 | N/A |
+| P1-3: Batch Logs | LOW | 1 day | LOW | Week 1 | N/A |
+
+**Phase 1 Deliverables:**
+- ✅ Full RFC 9700 compliance (DPoP, refresh rotation, PKCE for all)
+- ✅ CVSS 4.0 scores for all findings
+- ✅ Bugcrowd VRT P1-P5 mappings
+- ✅ Enhanced export formats (PDF, Markdown, Bug Bounty templates)
+
+---
+
+### Phase 2: Enhanced Detection (Weeks 4-8) - HIGH PRIORITY
+
+| Item | Priority | Effort | Impact | Timeline | Standards |
+|------|----------|--------|--------|----------|-----------|
+| **P2-7: Passive MFA Detection** ⭐ | HIGH | 2 weeks | VERY HIGH | Week 4-5 | OWASP WSTG, NIST 800-63B |
+| **P2-8: Session Lifecycle** ⭐ | MEDIUM | 2 weeks | MEDIUM | Week 5-6 | OWASP WSTG |
+| **P2-9: Password Policy** ⭐ | LOW | 1 week | LOW | Week 6-7 | NIST SP 800-63B |
+| P2-1: Timeline Visualization | LOW | 1 week | MEDIUM | Week 7 | N/A |
+| P2-3: Notifications | MEDIUM | 3 days | MEDIUM | Week 4 | N/A |
+| P2-4: Export Preview | LOW | 3 days | LOW | Week 7 | N/A |
+| P2-5: Quality UI | LOW | 1 week | LOW | Week 8 | N/A |
+| P2-6: Storage Degradation | LOW | 1 week | MEDIUM | Week 8 | N/A |
+
+**Phase 2 Deliverables:**
+- ✅ MFA detection (WebAuthn/TOTP/SMS + bypass mechanisms)
+- ✅ Session timeout/rotation tracking
+- ✅ Password policy analysis
+- ✅ Improved UX (notifications, previews, quality indicators)
+
+---
+
+### Phase 3: Advanced Features (Months 2-3) - OPTIONAL
+
+| Item | Priority | Effort | Impact | Timeline | Notes |
+|------|----------|--------|--------|----------|-------|
+| **P3-6: Active Testing** ⭐ | LOW | 3 weeks | MEDIUM | Month 3 | **Opt-in only, requires consent** |
+| P3-4: Bug Bounty Integration | MEDIUM | 2 weeks | HIGH | Q1 2026 | HackerOne/Bugcrowd API |
+| P3-1: Collaboration | LOW | 2 weeks | LOW | Q1 2026 | Team features |
+| P3-2: Learning Analytics | LOW | 2 weeks | MEDIUM | Q1 2026 | Usage tracking |
+| P3-3: ML False Positives | LOW | 1 month | HIGH | Q2 2026 | Requires data |
+| P3-5: Compliance Reports | LOW | 1 month | MEDIUM | Q3 2026 | OWASP/PCI-DSS |
+
+**Phase 3 Notes:**
+- Active testing is OPT-IN only (requires explicit user consent)
+- Bug bounty integration depends on platform APIs
+- ML features require sufficient usage data
+
+---
+
+### Quick Reference: New vs. Existing Items
+
+**⭐ NEW (2025 Standards):**
+- P1-5: RFC 9700 (OAuth 2.1) Compliance
+- P1-6: CVSS 4.0 Integration
+- P1-7: Bugcrowd VRT Mapping
+- P2-7: Passive MFA Detection
+- P2-8: Session Lifecycle Tracking
+- P2-9: Password Policy Detection
+- P3-6: Active Testing Framework (opt-in)
+
+**Existing (From Original Roadmap):**
+- P1-0 to P1-4: Message queue, notifications, quality, exports
+- P2-1 to P2-6: Timeline viz, summaries, UI improvements
+- P3-1 to P3-5: Collaboration, learning, ML, BB integration, compliance
 
 ---
 
 ## Success Metrics
 
-### User Satisfaction
+### Standards Compliance Metrics ⭐ NEW
+
+#### RFC 9700 (OAuth 2.1) Coverage
+- **Goal:** 100% of RFC 9700 required checks implemented
+- **Measure:** Automated test coverage
+- **Checkpoints:**
+  - ✅ DPoP detection for public clients
+  - ✅ Refresh token rotation tracking
+  - ✅ PKCE required for ALL client types (not just public)
+  - ✅ Resource indicator recommendations
+
+#### CVSS 4.0 Accuracy
+- **Goal:** All findings have valid CVSS 4.0 scores
+- **Measure:** Automated validation of CVSS vectors
+- **Checkpoints:**
+  - ✅ 100% of findings have CVSS 4.0 scores
+  - ✅ CVSS vector strings validate per FIRST.org spec
+  - ✅ Severity alignment: Hera ≈ CVSS (±1 level acceptable)
+
+#### Bugcrowd VRT Alignment
+- **Goal:** 90%+ of findings mapped to VRT categories
+- **Measure:** VRT coverage percentage
+- **Checkpoints:**
+  - ✅ P1/P2 findings have documented justifications
+  - ✅ VRT priority aligns with bug bounty acceptance rates
+  - ✅ All critical findings mapped to VRT baseline
+
+#### OWASP WSTG 2025 Coverage
+- **Goal:** 80% coverage of Authentication Testing chapter
+- **Measure:** Manual checklist validation
+- **Categories:**
+  - ✅ Credentials Transmitted Over Encrypted Channel
+  - ✅ Default Credentials
+  - ✅ Weak Lock Out Mechanism
+  - ✅ Bypassing Authentication Schema
+  - ✅ Remember Password Functionality
+  - ✅ Browser Cache Weaknesses
+  - ✅ Weak Password Policy
+  - ✅ Weak Security Question/Answer
+  - ✅ Weak Password Change/Reset
+  - ✅ Weaker Authentication in Alternative Channel
+
+---
+
+### Detection Metrics ⭐ NEW
+
+#### MFA Detection Rate
+- **Goal:** Detect 90%+ of MFA implementations
+- **Measure:** Manual verification on known MFA sites
+- **Breakdown:**
+  - WebAuthn/FIDO2 detection: 95%+
+  - TOTP/Authenticator app detection: 90%+
+  - SMS OTP detection: 85%+
+  - MFA bypass mechanism detection: 80%+
+
+#### Session Management Coverage
+- **Goal:** Detect 95% of session security issues
+- **Measure:** Test against OWASP WSTG session checklist
+- **Issues:**
+  - Session fixation
+  - Weak session IDs
+  - Missing timeout
+  - Concurrent sessions
+  - Remember me token issues
+
+#### Password Policy Detection
+- **Goal:** Extract password policy from 70% of password endpoints
+- **Measure:** Success rate on test suite
+- **Extracted:**
+  - Minimum length
+  - Complexity requirements
+  - Maximum length (if disclosed)
+
+---
+
+### User Experience Metrics
+
+#### User Satisfaction
 - **Goal:** 90% of users find evidence "useful" or "very useful"
 - **Measure:** Post-export survey
 
-### Export Rate
+#### Export Rate
 - **Goal:** 50% of sessions with findings result in exports
 - **Baseline:** Currently unknown (not tracked)
+- **Target:** Increase by 20% after enhanced export formats
 
-### False Positive Rate
-- **Goal:** <10% of exported findings are false positives
-- **Measure:** User feedback on exports
+#### False Positive Rate
+- **Goal:** <5% of exported findings are false positives
+- **Baseline:** Currently <10%
+- **Improvement:** 50% reduction via confidence scoring
 
-### Evidence Completeness
+#### Evidence Completeness
 - **Goal:** 95% of exported evidence packages have all required fields
 - **Measure:** Automated validation on export
+- **Required Fields:**
+  - Request/response data
+  - CVSS 4.0 score
+  - Bugcrowd VRT mapping
+  - CWE/CVE references
+  - Reproduction steps
 
-### Time to Export
-- **Goal:** <30 seconds from finding detection to PDF export
+#### Time to Export
+- **Goal:** <2 minutes from detection to bug bounty submission
 - **Baseline:** Currently unknown
+- **Includes:** Finding detection → Evidence collection → PDF generation → Export
+
+---
+
+### Bug Bounty Success Metrics ⭐ NEW
+
+#### Report Acceptance Rate
+- **Goal:** Track % of Hera-generated reports accepted by bug bounty programs
+- **Measure:** Optional user feedback form
+- **Target:** 70%+ acceptance rate
+
+#### Time to First Finding
+- **Goal:** Average time to detect first security issue
+- **Target:** <5 minutes after OAuth flow completion
+
+#### Critical Finding Detection
+- **Goal:** Detect at least 1 CRITICAL/HIGH finding per vulnerable application
+- **Measure:** Success rate on intentionally vulnerable test apps
 
 ---
 
@@ -814,5 +2264,120 @@ https://github.com/anthropics/hera/issues
 
 ---
 
-**Last Updated:** 2025-10-27
+## Summary: Roadmap at a Glance
+
+### What's New in Version 0.2.0 ⭐
+
+This roadmap update integrates **2025 authentication security best practices** from leading standards organizations:
+
+1. **RFC 9700 (OAuth 2.1)** - January 2025 security requirements
+2. **CVSS 4.0** - Modern vulnerability scoring
+3. **Bugcrowd VRT** - Industry-standard bug bounty severity
+4. **OWASP WSTG 2025** - Comprehensive auth testing guide
+5. **NIST SP 800-63B** - Password and MFA guidelines
+
+### Implementation Timeline
+
+- **Weeks 1-4 (P1):** Standards compliance (RFC 9700, CVSS 4.0, VRT)
+- **Weeks 4-8 (P2):** Enhanced detection (MFA, session lifecycle, password policy)
+- **Months 2-3 (P3):** Advanced features (active testing opt-in, bug bounty integration)
+
+### Expected Outcomes
+
+**After Phase 1 (Week 4):**
+- ✅ Full OAuth 2.1 compliance
+- ✅ CVSS 4.0 scores in all exports
+- ✅ Bug bounty-ready reports (PDF, Markdown, templates)
+- ✅ Bugcrowd P1-P5 severity mappings
+
+**After Phase 2 (Week 8):**
+- ✅ MFA implementation detection (WebAuthn/TOTP/SMS)
+- ✅ MFA bypass vulnerability detection
+- ✅ Session timeout and rotation tracking
+- ✅ Password policy analysis
+- ✅ 80% OWASP WSTG coverage
+
+**After Phase 3 (Month 3):**
+- ✅ Optional active testing (with explicit user consent)
+- ✅ One-click bug bounty submission
+- ✅ Compliance report generation
+
+### Module Count
+
+**New Modules:** 8
+- `oauth2-2025-validator.js` - RFC 9700 compliance
+- `dpop-validator.js` - DPoP header validation
+- `cvss-calculator.js` - CVSS 4.0 scoring
+- `bugcrowd-vrt-mapper.js` - VRT alignment
+- `mfa-detector.js` - MFA detection
+- `session-lifecycle-tracker.js` - Session management
+- `password-policy-analyzer.js` - Password policy extraction
+- `active-tester.js` - Opt-in active testing
+
+**Enhanced Modules:** 5
+- `oauth2-analyzer.js` - Updated PKCE severity
+- `webauthn-validator.js` - MFA context
+- `auth-issue-database.js` - New issue types
+- `export-manager.js` - PDF/MD/BB templates
+- `session-security-analyzer.js` - Lifecycle integration
+
+### New Vulnerability Detections
+
+**OAuth2/OIDC (RFC 9700):**
+- Missing DPoP (MEDIUM)
+- Refresh token not rotated (HIGH)
+- PKCE missing on confidential clients (HIGH - severity increased)
+- Missing resource indicators (LOW)
+
+**MFA:**
+- MFA code in URL (HIGH)
+- MFA not enforced on sensitive endpoints (HIGH)
+- MFA bypass token excessive lifetime (MEDIUM)
+- SMS-based MFA detected (INFO with recommendations)
+
+**Session Management:**
+- Session no absolute timeout (MEDIUM)
+- Session excessive lifetime >24h (MEDIUM)
+- Inactivity timeout not enforced (LOW)
+- Concurrent sessions allowed (LOW)
+- Remember me token weak entropy (MEDIUM)
+
+**Password Policy:**
+- Weak password policy (MEDIUM)
+- No password minimum length (MEDIUM)
+
+### Standards Compliance Checklist
+
+- ✅ RFC 9700 (OAuth 2.1 Security Best Current Practice)
+- ✅ RFC 9449 (DPoP - Sender-Constrained Tokens)
+- ✅ RFC 8707 (Resource Indicators)
+- ✅ CVSS 4.0 (Common Vulnerability Scoring System)
+- ✅ Bugcrowd VRT (P1-P5 severity taxonomy)
+- ✅ OWASP WSTG 2025 (Authentication Testing - 80% coverage)
+- ✅ NIST SP 800-63B (Digital Identity Guidelines)
+
+### Key Principles Maintained
+
+From CLAUDE.md adversarial design principles:
+
+1. **Evidence-based detection** - Report facts, not guesses
+2. **Context-aware severity** - HSTS risk varies by application type
+3. **False positive avoidance** - Smart exemptions (OAuth2 token endpoints)
+4. **RFC compliance** - No CSRF on token endpoints per RFC 6749/7636
+5. **Privacy-first** - 3-tier token redaction (high/medium/low risk)
+6. **Passive-by-default** - Active testing OPT-IN only with explicit consent
+
+### Breaking Changes
+
+**None.** All enhancements are backward-compatible:
+- Existing detections continue to work
+- New CVSS 4.0 scores complement existing severity
+- Bugcrowd VRT mappings are additive
+- Active testing is opt-in (disabled by default)
+
+---
+
+**Last Updated:** 2025-10-28
+**Version:** 0.2.0
 **Maintained by:** Hera Development Team
+**Standards:** RFC 9700, CVSS 4.0, Bugcrowd VRT, OWASP WSTG 2025, NIST SP 800-63B

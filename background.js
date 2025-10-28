@@ -39,6 +39,10 @@ import { JWTValidator } from './modules/auth/jwt-validator.js';
 import { SessionSecurityAnalyzer } from './modules/auth/session-security-analyzer.js';
 import { SCIMAnalyzer } from './modules/auth/scim-analyzer.js';
 
+// ==================== P0 PREREQUISITE MODULES ====================
+import { ResponseBodyCapturer } from './modules/response-body-capturer.js';
+import { RefreshTokenTracker } from './modules/auth/refresh-token-tracker.js';
+
 // ==================== INFRASTRUCTURE MODULES ====================
 import { storageManager } from './modules/storage-manager.js';
 import { memoryManager } from './modules/memory-manager.js';
@@ -243,6 +247,11 @@ const authRequests = new Proxy(memoryManager.authRequests, {
   }
 });
 
+// P0 PREREQUISITE MODULES: Initialize after authRequests is available
+// CRITICAL FIX: Create refreshTokenTracker first, then pass to responseBodyCapturer
+const refreshTokenTracker = new RefreshTokenTracker();
+const responseBodyCapturer = new ResponseBodyCapturer(authRequests, evidenceCollector, refreshTokenTracker);
+
 const debugTargetsWrapperCache = new Map();
 const debugTargets = new Proxy(memoryManager.debugTargets, {
   get(target, prop) {
@@ -343,7 +352,9 @@ const webRequestListeners = new WebRequestListeners(
   decodeRequestBody,
   jwtValidator,
   sessionSecurityAnalyzer,
-  scimAnalyzer
+  scimAnalyzer,
+  responseBodyCapturer,
+  refreshTokenTracker
 );
 
 // Initialize debugger events
