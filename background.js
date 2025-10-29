@@ -389,15 +389,13 @@ const messageRouter = new MessageRouter(
   errorCollector
 );
 
-// Register all handlers
-debuggerEvents.register();
-messageRouter.register();
-
 // ==================== DEBUG MODE MESSAGE HANDLERS ====================
+// CRITICAL: Register BEFORE MessageRouter to ensure debug actions are handled first
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Only process debug mode messages
-  if (!message.action || !message.action.includes('Debug')) {
+  const debugActions = ['enableDebugMode', 'disableDebugMode', 'getDebugSession', 'exportDebugSession', 'clearDebugSession'];
+  if (!message.action || !debugActions.includes(message.action)) {
     return false; // Let other handlers process
   }
 
@@ -465,6 +463,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ success: true });
           break;
 
+        case 'openDebugWindow':
+          if (!message.domain) {
+            sendResponse({ success: false, error: 'Domain required' });
+            return;
+          }
+          // Open debug window
+          const windowUrl = chrome.runtime.getURL(`debug-window.html?domain=${encodeURIComponent(message.domain)}`);
+          chrome.windows.create({
+            url: windowUrl,
+            type: 'popup',
+            width: 600,
+            height: 800,
+            left: window.screen.width - 620, // Position to the right
+            top: 100
+          }, (window) => {
+            if (chrome.runtime.lastError) {
+              console.error('[DebugMode] Failed to create window:', chrome.runtime.lastError);
+              sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+              console.log(`[DebugMode] Opened debug window for ${message.domain}`);
+              sendResponse({ success: true, windowId: window.id });
+            }
+          });
+          break;
+
         default:
           sendResponse({ success: false, error: 'Unknown debug action' });
       }
@@ -475,6 +498,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   })();
 
   return true; // Async response
+});
+
+// Register all handlers
+debuggerEvents.register();
+messageRouter.register();
+
+// ==================== DEBUG WINDOW PORT CONNECTIONS ====================
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'debug-window') {
+    console.log('[DebugMode] Debug window connected');
+
+    // Wait for registration message
+    port.onMessage.addListener((message) => {
+      if (message.type === 'register' && message.domain) {
+        debugModeManager.registerDebugWindow(message.domain, port);
+      } else if (message.type === 'clearSession' && message.domain) {
+        debugModeManager.clearSession(message.domain);
+      } else if (message.type === 'exportSession' && message.domain) {
+        const data = debugModeManager.exportEnhanced(message.domain);
+        // Trigger download
+        chrome.downloads.download({
+          url: 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(data, null, 2)),
+          filename: `hera-debug-${message.domain}-${new Date().toISOString().slice(0, 10)}.json`,
+          saveAs: true
+        });
+      }
+    });
+
+    // Handle disconnection
+    port.onDisconnect.addListener(() => {
+      console.log('[DebugMode] Debug window disconnected');
+      // Find and unregister this port
+      for (const [domain, p] of debugModeManager.debugWindowPorts.entries()) {
+        if (p === port) {
+          debugModeManager.unregisterDebugWindow(domain);
+          break;
+        }
+      }
+    });
+  }
 });
 
 async function initializeWebRequestListeners() {

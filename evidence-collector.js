@@ -24,7 +24,7 @@ class EvidenceCollector {
 
     this.initialized = false;
     this.initPromise = this.initialize();
-    this.MAX_CACHE_SIZE = 100;
+    this.MAX_CACHE_SIZE = 50; // Reduced from 100 - debug mode adds more data per request
     this.MAX_TIMELINE = 500;
 
     // SECURITY FIX P2-NEW: Storage schema versioning
@@ -417,6 +417,32 @@ class EvidenceCollector {
       const beforeSize = this._timeline.length;
       this._timeline = this._timeline.slice(-this.MAX_TIMELINE);
       console.log(`Hera: Cleaned timeline: ${beforeSize} → ${this._timeline.length} events`);
+      cleaned = true;
+    }
+
+    // Clean up Maps that can grow unbounded
+    const MAX_FLOW_CORRELATION = 100;
+    if (this._flowCorrelation.size > MAX_FLOW_CORRELATION) {
+      const beforeSize = this._flowCorrelation.size;
+      const entries = Array.from(this._flowCorrelation.entries()).slice(-MAX_FLOW_CORRELATION);
+      this._flowCorrelation = new Map(entries);
+      console.log(`Hera: Cleaned flow correlation: ${beforeSize} → ${this._flowCorrelation.size}`);
+      cleaned = true;
+    }
+
+    const MAX_ACTIVE_FLOWS = 50;
+    if (this._activeFlows.size > MAX_ACTIVE_FLOWS) {
+      const beforeSize = this._activeFlows.size;
+      const entries = Array.from(this._activeFlows.entries()).slice(-MAX_ACTIVE_FLOWS);
+      this._activeFlows = new Map(entries);
+      console.log(`Hera: Cleaned active flows: ${beforeSize} → ${this._activeFlows.size}`);
+      cleaned = true;
+    }
+
+    if (this._proofOfConcepts.length > 50) {
+      const beforeSize = this._proofOfConcepts.length;
+      this._proofOfConcepts = this._proofOfConcepts.slice(-50);
+      console.log(`Hera: Cleaned POCs: ${beforeSize} → ${this._proofOfConcepts.length}`);
       cleaned = true;
     }
 

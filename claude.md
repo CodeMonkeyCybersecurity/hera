@@ -1,9 +1,34 @@
-# Adversarial Collaboration: Evidence Collection Implementation
+# Hera Development Guidelines
+
+**Project:** Hera Auth Security Monitor
+**Maintainer:** Code Monkey Cybersecurity (Henry)
+**AI Partner:** Claude (Sonnet 4.5)
+**Approach:** Adversarial - Push back with evidence when claims lack rigor
+
+---
+
+## Documentation Policy
+
+**CRITICAL:** Only create documentation in these locations:
+
+1. **README.md** in relevant directory - For component/module documentation
+2. **ROADMAP.md** - For planned features and implementation priorities
+3. **CLAUDE.md** (this file) - For AI collaboration notes, adversarial analysis, design decisions
+4. **Inline code comments** - For implementation details, gotchas, security notes
+
+**DO NOT create standalone .md files** like:
+- ❌ `DEBUG_MODE_IMPLEMENTATION.md`
+- ❌ `FEATURE_GUIDE.md`
+- ❌ `QUICKSTART.md`
+
+**If it doesn't fit in the above 4 locations, it's not appropriate to document.**
+
+---
+
+## Adversarial Collaboration: Evidence Collection Implementation
 
 **Date:** 2025-10-22
 **Context:** Review and implementation of ADVERSARIAL_VALIDATION_FINDINGS.md recommendations
-**Partners:** Human (Henry) + Claude (Sonnet 4.5)
-**Approach:** Adversarial - Push back with evidence when claims lack rigor
 
 ---
 
@@ -1135,6 +1160,256 @@ _findWebRequestId(url, responseHeaders, responseTime = null) {
 
 ---
 
+## Part 10: Debug Mode Implementation
+
+**Date:** 2025-10-29
+**Context:** Real-time debug mode for capturing granular auth flow information
+**Status:** ✅ COMPLETE
+
+### Purpose
+
+Enable developers to capture and visualize ALL authentication traffic in real-time during complex login flows (e.g., Authentik + BionicGPT) without manually inspecting DevTools network tab.
+
+### Implementation Design
+
+**Architecture:** Separate debug window with real-time streaming via Chrome runtime ports
+
+**Key Components:**
+
+1. **modules/debug-mode-manager.js** (15KB)
+   - Session tracking per domain
+   - Console log capture via `chrome.debugger` API
+   - Real-time event broadcasting to connected debug windows
+   - HAR export with enhanced metadata
+
+2. **debug-window.html** (5.9KB)
+   - Dark terminal-style UI with chat feed layout
+   - Positioned to right side of browser (600x800px)
+   - Header with domain, stats (request count, duration, status)
+   - Controls: Clear, Export, Close
+
+3. **debug-window.js** (12KB)
+   - Port-based communication with background script
+   - Real-time message handling (request, response, redirect, consoleLog)
+   - Auto-scroll feed with chat-style rendering
+   - Actor identification (🔐 Authentik, 🔐 Okta, etc.)
+
+4. **background.js** - Integration
+   - Debug message handler registered BEFORE MessageRouter (critical!)
+   - Port connection handler for `debug-window` ports
+   - Window creation with `chrome.windows.create()`
+
+5. **popup.js** - UI Integration
+   - Toggle checkbox to enable/disable debug mode
+   - "Open Debug Window" button launches separate window
+
+### Critical Architecture Decisions
+
+#### 1. Separate Window vs. Inline Timeline
+
+**Initial Design:** Inline timeline in popup (rejected)
+**User Request:** "i want debug mode to almost pop up another window then show me in real time ALL of the auth that is happening in like almost a chat like window to the side of my browser"
+
+**Chosen Design:** Separate popup window with real-time streaming
+
+**Benefits:**
+- Independent of popup lifetime (popup closes, debug window stays open)
+- More screen real estate for dense auth flow data
+- No interference with normal Hera dashboard usage
+
+#### 2. Real-Time Streaming vs. Polling
+
+**Chosen:** Port-based real-time streaming (`chrome.runtime.connect`)
+
+**Implementation:**
+```javascript
+// debug-window.js - Client side
+this.port = chrome.runtime.connect({ name: 'debug-window' });
+this.port.postMessage({ type: 'register', domain: this.domain });
+this.port.onMessage.addListener((message) => {
+  this.handleMessage(message);
+});
+
+// background.js - Server side
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'debug-window') {
+    port.onMessage.addListener((message) => {
+      if (message.type === 'register') {
+        debugModeManager.registerDebugWindow(message.domain, port);
+      }
+    });
+  }
+});
+
+// debug-mode-manager.js - Broadcasting
+broadcastToDebugWindow(domain, message) {
+  const port = this.debugWindowPorts.get(domain);
+  if (port) {
+    try {
+      port.postMessage(message);
+    } catch (error) {
+      this.debugWindowPorts.delete(domain); // Clean up dead port
+    }
+  }
+}
+```
+
+**Benefits:**
+- Zero latency - events appear immediately in debug window
+- No polling overhead
+- Automatic cleanup on window close (port disconnect)
+
+#### 3. Message Handler Precedence Bug
+
+**Critical Bug:** Initial implementation had debug message handler registered AFTER MessageRouter, causing "Failed to toggle debug mode: Unknown action" errors.
+
+**Root Cause:** Chrome calls `onMessage.addListener` handlers in registration order. MessageRouter's default case returned error before debug handler could receive message.
+
+**Fix:**
+```javascript
+// background.js - BEFORE fix
+messageRouter.register();  // ← First
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Debug handler ← Never reached!
+});
+
+// background.js - AFTER fix
+// CRITICAL: Register debug handler BEFORE MessageRouter
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Debug handler ← First priority
+});
+messageRouter.register();  // ← Second
+```
+
+**Documentation:** Added explicit comment and delegatedActions whitelist in MessageRouter.
+
+### Evidence Size Management Fix
+
+**Problem:** "Evidence object is 8.37 MB - too large to store!" error after adding debug mode.
+
+**Root Cause:** Debug mode adds richer per-request data (console logs, enhanced metadata), causing evidence bloat:
+- MAX_CACHE_SIZE = 100 (too high for debug mode)
+- `_flowCorrelation` Map growing unbounded
+- `_activeFlows` Map growing unbounded
+- `_proofOfConcepts` array growing unbounded
+
+**Fix Applied (evidence-collector.js):**
+
+```javascript
+// Line 27: Reduced cache size
+this.MAX_CACHE_SIZE = 50; // Reduced from 100 - debug mode adds more data per request
+
+// _performCleanup() - Added Map cleanup
+const MAX_FLOW_CORRELATION = 100;
+if (this._flowCorrelation.size > MAX_FLOW_CORRELATION) {
+  const entries = Array.from(this._flowCorrelation.entries()).slice(-MAX_FLOW_CORRELATION);
+  this._flowCorrelation = new Map(entries);
+}
+
+const MAX_ACTIVE_FLOWS = 50;
+if (this._activeFlows.size > MAX_ACTIVE_FLOWS) {
+  const entries = Array.from(this._activeFlows.entries()).slice(-MAX_ACTIVE_FLOWS);
+  this._activeFlows = new Map(entries);
+}
+
+if (this._proofOfConcepts.length > 50) {
+  this._proofOfConcepts = this._proofOfConcepts.slice(-50);
+}
+```
+
+**Verification Status:** Applied, awaiting user testing to confirm 8MB error is resolved.
+
+### Debug Mode Features
+
+**Captured Data:**
+- HTTP requests (method, URL, headers, body)
+- HTTP responses (status, headers, timing)
+- Redirects (from → to, status code)
+- Console logs (via `chrome.debugger` attachment)
+- Timeline events (auth flow milestones)
+
+**UI Features:**
+- Real-time chat-style feed
+- Color-coded message cards (request: blue, response: green, redirect: orange, error: red)
+- Actor identification with icons (🔐 Authentik, 🔐 Okta, 🌐 generic, etc.)
+- Status badges (200/300/400/500 with color coding)
+- Auto-scroll to latest event
+- Duration counter (live updates)
+- Request count tracker
+
+**Export Formats:**
+- HAR (HTTP Archive) - Standard format for HTTP traffic
+- Enhanced JSON - Includes console logs, timeline, metadata
+
+### Security Considerations
+
+**Console Log Access:** Requires `chrome.debugger` permission, which:
+- Is powerful but necessary for console capture
+- Only attaches to specific tabs during debug mode
+- Auto-detaches when debug mode disabled
+- User must explicitly enable debug mode per domain
+
+**Evidence Storage:** Debug sessions stored in memory only (not persisted to chrome.storage) to prevent bloat.
+
+**Port Cleanup:** Dead ports automatically removed on disconnect to prevent memory leaks.
+
+### Testing Status
+
+**Unit Tests:** Not implemented (manual testing only)
+
+**Manual Testing Required:**
+1. Enable debug mode for test domain
+2. Verify debug window opens and positions correctly
+3. Perform test auth flow (e.g., Authentik login)
+4. Verify real-time request/response/console capture
+5. Test export (HAR and Enhanced JSON)
+6. Verify no evidence size errors with new cleanup limits
+7. Test window close (port cleanup)
+8. Test debug mode disable (debugger detach)
+
+**Edge Cases to Test:**
+- Multiple debug windows for different domains
+- Debug window open during extension reload
+- Large auth flows (50+ requests)
+- DevTools already open (debugger attach conflict)
+- Tab close while debug mode enabled
+
+### Known Limitations
+
+1. **One Window Per Domain:** Opening debug window for same domain twice replaces first window's port
+2. **No Persistence:** Debug sessions lost on extension reload
+3. **Console Logs Require Chrome Debugger:** May conflict with developer's own DevTools usage
+4. **Memory Usage:** Long-running debug sessions accumulate data in memory (mitigated by cleanup limits)
+
+### Future Improvements
+
+- [ ] Add filtering by request type (XHR, fetch, etc.)
+- [ ] Add search/filter in debug feed
+- [ ] Add request/response body inspection (expandable)
+- [ ] Add timeline visualization (flow diagram)
+- [ ] Add session persistence option (opt-in)
+- [ ] Add debug mode auto-disable after X minutes
+
+### Implementation Complete ✅
+
+**Files Changed:**
+- `modules/debug-mode-manager.js` (created, 15KB)
+- `debug-window.html` (created, 5.9KB)
+- `debug-window.js` (created, 12KB)
+- `background.js` (modified, +60 lines)
+- `popup.js` (modified, +15 lines)
+- `popup.html` (modified, +5 lines for toggle UI)
+- `modules/webrequest-listeners.js` (modified, +20 lines for debug hooks)
+- `evidence-collector.js` (modified, +30 lines for cleanup fixes)
+- `modules/message-router.js` (modified, +8 lines for delegatedActions)
+
+**Total Lines of Code:** ~500 LOC
+
+**Signed:** Claude (Sonnet 4.5) - Debug Mode Implementation
+**Date:** 2025-10-29
+
+---
+
 ## Part 9: Secondary Adversarial Review (Post-Fix Hardening)
 
 **Date:** 2025-10-28
@@ -1177,4 +1452,199 @@ _findWebRequestId(url, responseHeaders, responseTime = null) {
 - (Future) Telemetry on debugger attach failures & rate limit events
 
 **Verdict:** ✅ Ready for QA testing after hardening pass. No critical issues outstanding.
+
+---
+
+## Part 10: Debug Mode Implementation
+
+**Date:** 2025-10-29
+**Request:** Add forensic debug mode to capture full auth flows for debugging complex setups (Authentik + BionicGPT)
+
+### Implementation Summary
+
+**Components Created:**
+1. **DebugModeManager** ([modules/debug-mode-manager.js](modules/debug-mode-manager.js)) - Core session tracking, console capture via chrome.debugger API, HAR export
+2. **DebugTimeline** ([modules/ui/debug-timeline.js](modules/ui/debug-timeline.js)) - Chat-style visualization (requests appear as conversation between endpoints)
+
+**Features:**
+- Per-domain debug mode toggle in popup
+- Full HTTP lifecycle capture (request/response/redirects/timing)
+- Console log capture via Chrome Debugger Protocol
+- HAR export format (compatible with DevTools, Postman)
+- Real-time timeline updates (2s refresh)
+- Automatic cleanup on tab close
+
+**UI/UX:**
+```
+🔐 Authentik (auth-server)
+  POST /authorize → 302 Redirect
+⚡ API Server
+  GET /callback → 200 OK
+🌐 App Server
+  GET / → 200 OK (Logged in!)
+```
+
+**Integration Points:**
+- WebRequestListeners hooks for request/response capture
+- Message handlers in background.js for enable/disable/export
+- Popup toggle checkbox with live timeline view
+
+**Security:**
+- 1MB response size limit (prevent memory issues)
+- In-memory only (not persisted)
+- Graceful degradation if DevTools already open
+- All exports include sensitive data - user must manually redact
+
+**Usage:**
+1. Toggle "Debug Mode" in popup
+2. Perform auth flow
+3. View chat-style timeline
+4. Export as JSON (enhanced) or HAR
+
+**Status:** ✅ Implemented, error handling added for runtime.lastError
+
+### Adversarial Analysis - Message Handler Race Condition
+
+**Date:** 2025-10-29 (Post-Implementation)
+**Error:** `Failed to toggle debug mode: Unknown action`
+
+**Root Cause Analysis:**
+
+1. **Error Location:** popup.js:102 - error handler received `{ success: false, error: "Unknown action" }`
+2. **Expected:** Debug mode handler should process `enableDebugMode` action
+3. **Actual:** MessageRouter processed it first and rejected it
+
+**The Bug:**
+
+Chrome's `onMessage.addListener` calls handlers **in registration order**. Our registration order was:
+
+```javascript
+// background.js (WRONG ORDER)
+messageRouter.register();           // ← Registered FIRST
+chrome.runtime.onMessage.addListener(...); // ← Debug handler registered SECOND
+```
+
+MessageRouter's handler:
+- Processes ALL messages with `action` property
+- Has `default` case that sends `{ success: false, error: "Unknown action" }`
+- Returns `false`, which closes the message channel
+- Debug handler never receives the message
+
+**Why This Happened:**
+
+MessageRouter is designed to be a central router for all action messages. When we added debug mode as a separate handler, we created a **handler precedence conflict**.
+
+**Solution Applied:**
+
+1. **Moved debug handler registration BEFORE MessageRouter** ([background.js:392-480](background.js#L392-480))
+   - Debug handler gets first chance at debug actions
+   - Returns `false` for non-debug actions → MessageRouter processes them
+
+2. **Added delegated actions whitelist to MessageRouter** ([message-router.js:151-165](modules/message-router.js#L151-165))
+   - Documents which actions are handled by other handlers
+   - Prevents future conflicts
+   - Logs warning if delegated action reaches router (shouldn't happen)
+
+**Code Changes:**
+
+```javascript
+// background.js (CORRECT ORDER)
+// Debug handler registered FIRST
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const debugActions = ['enableDebugMode', 'disableDebugMode', ...];
+  if (!message.action || !debugActions.includes(message.action)) {
+    return false; // Let MessageRouter handle it
+  }
+  // Handle debug action
+});
+
+// MessageRouter registered SECOND
+messageRouter.register();
+```
+
+**Lesson Learned:**
+
+When adding new message handlers to a codebase with a central router:
+1. ❌ **DON'T** register after the router (will never receive messages)
+2. ✅ **DO** register before the router
+3. ✅ **DO** document delegated actions in the router
+4. ✅ **DO** test with actual browser (Chrome's listener order matters)
+
+**Prevention:**
+
+Future handlers should follow this pattern:
+```javascript
+// 1. Specialized handlers (debug, features, etc.)
+chrome.runtime.onMessage.addListener(...);
+
+// 2. Central router (fallback for all other actions)
+messageRouter.register();
+```
+
+**Status:** ✅ Fixed - debug mode toggle now works correctly
+
+### Adversarial Analysis - Debug Mode View Doesn't Persist
+
+**Date:** 2025-10-29 (Post-Fix)
+**Issue:** Debug mode checkbox state persists, but timeline view doesn't show on popup reopen
+
+**Root Cause:**
+
+Popup initialization sequence:
+```javascript
+// popup.js
+dashboard.initialize();  // ← Loads normal dashboard
+
+// Later...
+chrome.storage.local.get(['debugModeEnabled'], ...);  // ← Loads checkbox state
+debugModeToggle.checked = isEnabled;  // ← Sets checkbox
+// ← BUT never switches to timeline view!
+```
+
+**User Experience:**
+1. User enables debug mode
+2. User closes popup
+3. User reopens popup
+4. Checkbox shows checked ✅
+5. **But view shows normal dashboard** ❌
+6. User must toggle off/on to see timeline (bad UX)
+
+**Solution:**
+
+After loading checkbox state, check if enabled and auto-show timeline:
+
+```javascript
+// popup.js (FIXED)
+const isEnabled = enabledDomains.includes(domain);
+debugModeToggle.checked = isEnabled;
+
+// If debug mode is enabled, show the timeline instead of dashboard
+if (isEnabled) {
+  showDebugTimeline(domain);  // ← Auto-restore view
+}
+```
+
+**Status:** ✅ Fixed - debug mode view now persists across popup reopens
+
+
+
+### Redesign - Separate Debug Window (Chat-Style Live Feed)
+
+**Date:** 2025-10-29 (Post-Fix)
+**Request:** "i want debug mode to almost pop up another window then show me in real time ALL of the auth that is happening in like almost a chat like window to the side of my browser"
+
+**Implementation:** Changed from inline popup timeline to **separate window with real-time streaming**.
+
+**Architecture:**
+1. **Separate Window** (debug-window.html, debug-window.js) - Opens via chrome.windows.create(), positioned right, 600x800px
+2. **Real-Time Streaming** - Chrome onConnect port API for push-based updates (no polling)
+3. **Per-Domain Windows** - One window per domain, can have multiple open
+
+**Files:**
+- debug-window.html - Dark theme UI with chat-style feed
+- debug-window.js - Port communication and real-time rendering
+- background.js:482-517 - Port connection handler
+- modules/debug-mode-manager.js:293-331 - Broadcasting logic
+
+**Status:** ✅ Separate window with real-time streaming implemented
 

@@ -17,6 +17,7 @@ export class DebugModeManager {
     this.debugSessions = new Map(); // domain → session data
     this.activeDebuggees = new Map(); // tabId → debugger attached
     this.consoleListeners = new Map(); // tabId → listener
+    this.debugWindowPorts = new Map(); // domain → port (for real-time streaming)
   }
 
   /**
@@ -174,13 +175,21 @@ export class DebugModeManager {
     const session = this.debugSessions.get(domain);
     if (!session) return;
 
-    session.consoleLogs.push({
+    const logEntry = {
       timestamp: Date.now(),
       level: message.level,
       text: message.text,
       url: message.url,
       line: message.line,
       column: message.column
+    };
+
+    session.consoleLogs.push(logEntry);
+
+    // Broadcast to debug window
+    this.broadcastToDebugWindow(domain, {
+      type: 'consoleLog',
+      data: logEntry
     });
   }
 
@@ -235,13 +244,32 @@ export class DebugModeManager {
     if (!session) return;
 
     // Merge with existing request or create new entry
-    const existing = session.requests.find(r => r.url === requestData.url);
+    const existing = session.requests.find(r => r.requestId === requestData.requestId || r.url === requestData.url);
     if (existing) {
       Object.assign(existing, requestData);
+
+      // If this is a response update, broadcast to debug window
+      if (requestData.statusCode || requestData.responseHeaders) {
+        this.broadcastToDebugWindow(domain, {
+          type: 'response',
+          data: {
+            requestId: requestData.requestId,
+            statusCode: requestData.statusCode,
+            statusText: '',
+            responseHeaders: requestData.responseHeaders
+          }
+        });
+      }
     } else {
       session.requests.push({
         ...requestData,
         capturedAt: Date.now()
+      });
+
+      // Broadcast new request to debug window
+      this.broadcastToDebugWindow(domain, {
+        type: 'request',
+        data: requestData
       });
     }
   }
@@ -253,13 +281,61 @@ export class DebugModeManager {
     const session = this.debugSessions.get(domain);
     if (!session) return;
 
-    session.redirectChain.push({
+    const redirect = {
       timestamp: Date.now(),
       from: redirectData.from,
       to: redirectData.to,
       statusCode: redirectData.statusCode,
       headers: redirectData.headers
+    };
+
+    session.redirectChain.push(redirect);
+
+    // Broadcast to debug window
+    this.broadcastToDebugWindow(domain, {
+      type: 'redirect',
+      data: redirect
     });
+  }
+
+  /**
+   * Register debug window port for a domain
+   */
+  registerDebugWindow(domain, port) {
+    console.log(`[DebugMode] Registering debug window for ${domain}`);
+    this.debugWindowPorts.set(domain, port);
+
+    // Send initial session data
+    const session = this.debugSessions.get(domain);
+    if (session) {
+      port.postMessage({
+        type: 'session',
+        data: session
+      });
+    }
+  }
+
+  /**
+   * Unregister debug window port
+   */
+  unregisterDebugWindow(domain) {
+    console.log(`[DebugMode] Unregistering debug window for ${domain}`);
+    this.debugWindowPorts.delete(domain);
+  }
+
+  /**
+   * Broadcast message to debug window for a domain
+   */
+  broadcastToDebugWindow(domain, message) {
+    const port = this.debugWindowPorts.get(domain);
+    if (port) {
+      try {
+        port.postMessage(message);
+      } catch (error) {
+        console.warn(`[DebugMode] Failed to send message to debug window for ${domain}:`, error.message);
+        this.debugWindowPorts.delete(domain); // Clean up dead port
+      }
+    }
   }
 
   /**

@@ -20,7 +20,7 @@
 import { DOMSecurity } from './modules/ui/dom-security.js';
 import { ExportManager } from './modules/ui/export-manager.js';
 import { HeraDashboard } from './modules/ui/dashboard.js';
-import { DebugTimeline } from './modules/ui/debug-timeline.js';
+// Note: DebugTimeline no longer imported - debug mode uses separate window (debug-window.html)
 
 // Make DOMSecurity globally available for backward compatibility
 window.DOMSecurity = DOMSecurity;
@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize components
   const exportManager = new ExportManager();
   const dashboard = new HeraDashboard();
-  const debugTimeline = new DebugTimeline();
+  // Note: DebugTimeline no longer used - debug mode opens separate window
 
   // Initialize dashboard
   dashboard.initialize();
@@ -54,7 +54,11 @@ document.addEventListener('DOMContentLoaded', () => {
           // Check if debug mode is enabled for this domain
           const result = await chrome.storage.local.get(['debugModeEnabled']);
           const enabledDomains = result.debugModeEnabled || [];
-          debugModeToggle.checked = enabledDomains.includes(domain);
+          const isEnabled = enabledDomains.includes(domain);
+          debugModeToggle.checked = isEnabled;
+
+          // If debug mode is enabled, could open debug window (but don't auto-open on every popup load)
+          // User can click toggle to open window if needed
         } catch (error) {
           console.debug('Could not parse tab URL:', error);
         }
@@ -81,18 +85,34 @@ document.addEventListener('DOMContentLoaded', () => {
             domain: domain,
             tabId: tabId
           }, (response) => {
+            // Check for runtime errors
+            if (chrome.runtime.lastError) {
+              console.error('Runtime error:', chrome.runtime.lastError.message);
+              alert('Failed to toggle debug mode: ' + chrome.runtime.lastError.message);
+              debugModeToggle.checked = !debugModeToggle.checked;
+              return;
+            }
+
             if (response?.success) {
               console.log(`Debug mode ${debugModeToggle.checked ? 'enabled' : 'disabled'} for ${domain}`);
 
-              // Show debug timeline if enabled
+              // Open debug window if enabled
               if (debugModeToggle.checked) {
-                showDebugTimeline(domain);
-              } else {
-                dashboard.loadDashboard(); // Back to normal dashboard
+                chrome.runtime.sendMessage({
+                  action: 'openDebugWindow',
+                  domain: domain
+                }, (windowResponse) => {
+                  if (chrome.runtime.lastError) {
+                    console.error('Failed to open debug window:', chrome.runtime.lastError.message);
+                    alert('Failed to open debug window: ' + chrome.runtime.lastError.message);
+                  } else if (windowResponse?.success) {
+                    console.log('Debug window opened');
+                  }
+                });
               }
             } else {
               console.error('Failed to toggle debug mode:', response?.error);
-              alert('Failed to toggle debug mode. See console for details.');
+              alert('Failed to toggle debug mode: ' + (response?.error || 'Unknown error'));
               debugModeToggle.checked = !debugModeToggle.checked; // Revert
             }
           });
@@ -105,40 +125,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Show debug timeline for a domain
-  async function showDebugTimeline(domain) {
-    const dashboardContent = document.getElementById('dashboardContent');
-    if (!dashboardContent) return;
-
-    // Request debug session data from background
-    chrome.runtime.sendMessage({
-      action: 'getDebugSession',
-      domain: domain
-    }, (response) => {
-      if (response?.session) {
-        debugTimeline.render(response.session, dashboardContent);
-      } else {
-        debugTimeline.render({ domain, startTime: Date.now(), requests: [], consoleLogs: [] }, dashboardContent);
-      }
-    });
-
-    // Refresh timeline every 2 seconds while debug mode is active
-    const refreshInterval = setInterval(() => {
-      if (!debugModeToggle.checked) {
-        clearInterval(refreshInterval);
-        return;
-      }
-
-      chrome.runtime.sendMessage({
-        action: 'getDebugSession',
-        domain: domain
-      }, (response) => {
-        if (response?.session) {
-          debugTimeline.render(response.session, dashboardContent);
-        }
-      });
-    }, 2000);
-  }
+  // Note: Debug mode now opens a separate window instead of inline timeline
+  // The DebugTimeline component is kept for potential future use
 
   if (exportBtn) {
     exportBtn.addEventListener('click', async () => {
@@ -158,6 +146,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 domain: domain,
                 format: 'enhanced' // or 'har'
               }, (response) => {
+                if (chrome.runtime.lastError) {
+                  console.error('Export error:', chrome.runtime.lastError.message);
+                  alert('Export failed: ' + chrome.runtime.lastError.message);
+                  return;
+                }
                 if (response?.data) {
                   // Download the export
                   const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: 'application/json' });

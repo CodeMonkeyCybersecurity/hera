@@ -148,16 +148,33 @@ export class MessageRouter {
   routeAction(message, sender, sendResponse) {
     const action = message.action;
 
+    // Actions handled by other dedicated handlers (registered before MessageRouter)
+    const delegatedActions = [
+      'enableDebugMode',
+      'disableDebugMode',
+      'getDebugSession',
+      'exportDebugSession',
+      'clearDebugSession',
+      'openDebugWindow'
+    ];
+
+    if (delegatedActions.includes(action)) {
+      // These are handled by dedicated handlers registered earlier
+      // This should never be reached, but if it is, don't send error response
+      console.warn(`[MessageRouter] Delegated action reached router: ${action}`);
+      return false; // Let other handlers process
+    }
+
     switch (action) {
       case 'responseIntercepted':
         return this.handleResponseIntercepted(message, sendResponse);
-      
+
       case 'probe:alg_none':
         return this.handleProbeAlgNone(message, sender, sendResponse);
-      
+
       case 'repeater:send':
         return this.handleRepeaterSend(message, sender, sendResponse);
-      
+
       case 'getRequests':
         return this.handleGetRequests(sendResponse);
 
@@ -169,10 +186,10 @@ export class MessageRouter {
 
       case 'getBackendScan':
         return this.handleGetBackendScan(message, sendResponse);
-      
+
       case 'reportBlockedSubmission':
         return this.handleReportBlockedSubmission(message, sendResponse);
-      
+
       case 'clearRequests':
         return this.handleClearRequests(sendResponse);
 

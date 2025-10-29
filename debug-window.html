@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Hera Debug Mode</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Consolas', monospace;
+      background: #0d1117;
+      color: #c9d1d9;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .debug-header {
+      background: linear-gradient(135deg, #0ca678 0%, #099268 100%);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    .debug-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: white;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .debug-title .icon {
+      font-size: 18px;
+    }
+
+    .debug-controls {
+      display: flex;
+      gap: 8px;
+    }
+
+    .debug-controls button {
+      background: rgba(255,255,255,0.2);
+      border: 1px solid rgba(255,255,255,0.3);
+      color: white;
+      padding: 4px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .debug-controls button:hover {
+      background: rgba(255,255,255,0.3);
+    }
+
+    .debug-stats {
+      background: #161b22;
+      padding: 8px 16px;
+      display: flex;
+      gap: 20px;
+      font-size: 11px;
+      color: #8b949e;
+      border-bottom: 1px solid #21262d;
+    }
+
+    .stat {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .stat-value {
+      color: #58a6ff;
+      font-weight: 600;
+    }
+
+    .feed-container {
+      height: calc(100vh - 90px);
+      overflow-y: auto;
+      padding: 12px;
+      background: #0d1117;
+    }
+
+    .feed-message {
+      margin-bottom: 12px;
+      animation: slideIn 0.2s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .message-time {
+      font-size: 10px;
+      color: #6e7681;
+      margin-bottom: 4px;
+      font-family: 'Consolas', monospace;
+    }
+
+    .message-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-left: 3px solid;
+      border-radius: 6px;
+      padding: 10px 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+
+    .message-card.request {
+      border-left-color: #58a6ff;
+    }
+
+    .message-card.response {
+      border-left-color: #3fb950;
+    }
+
+    .message-card.redirect {
+      border-left-color: #d29922;
+    }
+
+    .message-card.error {
+      border-left-color: #f85149;
+    }
+
+    .message-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .actor-icon {
+      font-size: 14px;
+    }
+
+    .actor-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: #c9d1d9;
+    }
+
+    .method {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 3px;
+      text-transform: uppercase;
+    }
+
+    .method.GET { background: #1f6feb; color: white; }
+    .method.POST { background: #238636; color: white; }
+    .method.PUT { background: #9e6a03; color: white; }
+    .method.DELETE { background: #da3633; color: white; }
+
+    .message-url {
+      font-size: 11px;
+      color: #8b949e;
+      font-family: 'Consolas', monospace;
+      word-break: break-all;
+      margin-bottom: 6px;
+    }
+
+    .message-details {
+      font-size: 11px;
+      color: #8b949e;
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid #21262d;
+    }
+
+    .detail-line {
+      margin: 2px 0;
+      display: flex;
+      gap: 8px;
+    }
+
+    .detail-key {
+      color: #6e7681;
+      min-width: 80px;
+    }
+
+    .detail-value {
+      color: #c9d1d9;
+      font-family: 'Consolas', monospace;
+      flex: 1;
+    }
+
+    .status-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 3px;
+      margin-left: auto;
+    }
+
+    .status-2xx { background: #238636; color: white; }
+    .status-3xx { background: #1f6feb; color: white; }
+    .status-4xx { background: #9e6a03; color: white; }
+    .status-5xx { background: #da3633; color: white; }
+
+    .feed-empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: #6e7681;
+    }
+
+    .feed-empty-icon {
+      font-size: 48px;
+      margin-bottom: 12px;
+      opacity: 0.5;
+    }
+
+    /* Scrollbar */
+    .feed-container::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .feed-container::-webkit-scrollbar-track {
+      background: #0d1117;
+    }
+
+    .feed-container::-webkit-scrollbar-thumb {
+      background: #30363d;
+      border-radius: 4px;
+    }
+
+    .feed-container::-webkit-scrollbar-thumb:hover {
+      background: #484f58;
+    }
+  </style>
+</head>
+<body>
+  <div class="debug-header">
+    <div class="debug-title">
+      <span class="icon">🔍</span>
+      <span>Hera Debug Mode</span>
+      <span id="domainName" style="opacity: 0.7; font-size: 12px;"></span>
+    </div>
+    <div class="debug-controls">
+      <button id="clearBtn">Clear</button>
+      <button id="exportBtn">Export</button>
+      <button id="closeBtn">Close</button>
+    </div>
+  </div>
+
+  <div class="debug-stats">
+    <div class="stat">
+      <span>Requests:</span>
+      <span class="stat-value" id="requestCount">0</span>
+    </div>
+    <div class="stat">
+      <span>Duration:</span>
+      <span class="stat-value" id="duration">0s</span>
+    </div>
+    <div class="stat">
+      <span>Status:</span>
+      <span class="stat-value" id="status">Listening...</span>
+    </div>
+  </div>
+
+  <div class="feed-container" id="feed">
+    <div class="feed-empty">
+      <div class="feed-empty-icon">📡</div>
+      <div>Waiting for authentication traffic...</div>
+      <div style="font-size: 10px; margin-top: 8px;">Perform a login to see requests appear here</div>
+    </div>
+  </div>
+
+  <script src="debug-window.js" type="module"></script>
+</body>
+</html>
