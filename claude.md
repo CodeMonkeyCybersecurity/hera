@@ -1289,35 +1289,46 @@ messageRouter.register();  // ← Second
 
 **Root Cause:** Debug mode adds richer per-request data (console logs, enhanced metadata), causing evidence bloat:
 - MAX_CACHE_SIZE = 100 (too high for debug mode)
+- MAX_TIMELINE = 500 (WAY too high - timeline events are large with debug data)
 - `_flowCorrelation` Map growing unbounded
 - `_activeFlows` Map growing unbounded
 - `_proofOfConcepts` array growing unbounded
 
-**Fix Applied (evidence-collector.js):**
+**Fix Applied (evidence-collector.js) - Round 1:**
 
 ```javascript
-// Line 27: Reduced cache size
-this.MAX_CACHE_SIZE = 50; // Reduced from 100 - debug mode adds more data per request
+// Line 27-28: Initial reduction
+this.MAX_CACHE_SIZE = 50; // Reduced from 100
+this.MAX_TIMELINE = 500; // Left unchanged (MISTAKE!)
 
 // _performCleanup() - Added Map cleanup
 const MAX_FLOW_CORRELATION = 100;
-if (this._flowCorrelation.size > MAX_FLOW_CORRELATION) {
-  const entries = Array.from(this._flowCorrelation.entries()).slice(-MAX_FLOW_CORRELATION);
-  this._flowCorrelation = new Map(entries);
-}
-
 const MAX_ACTIVE_FLOWS = 50;
-if (this._activeFlows.size > MAX_ACTIVE_FLOWS) {
-  const entries = Array.from(this._activeFlows.entries()).slice(-MAX_ACTIVE_FLOWS);
-  this._activeFlows = new Map(entries);
-}
-
-if (this._proofOfConcepts.length > 50) {
-  this._proofOfConcepts = this._proofOfConcepts.slice(-50);
-}
+POC limit = 50;
 ```
 
-**Verification Status:** Applied, awaiting user testing to confirm 8MB error is resolved.
+**Result:** Still hit 8.55 MB error - limits not aggressive enough!
+
+**Fix Applied - Round 2 (MORE AGGRESSIVE):**
+
+```javascript
+// Line 27-28: Much more aggressive limits
+this.MAX_CACHE_SIZE = 25; // Reduced from 50 (50% reduction)
+this.MAX_TIMELINE = 100; // Reduced from 500 (80% reduction!) ← KEY FIX
+
+// _performCleanup() - More aggressive Map limits
+const MAX_FLOW_CORRELATION = 50;  // Reduced from 100
+const MAX_ACTIVE_FLOWS = 25;      // Reduced from 50
+POC limit = 25;                    // Reduced from 50
+```
+
+**Why MAX_TIMELINE was the main culprit:**
+- Timeline events include full request/response metadata
+- With debug mode, each event includes console logs, enhanced analysis
+- 500 events × ~17KB avg = 8.5MB+ just from timeline alone
+- Reducing to 100 events brings timeline to ~1.7MB (manageable)
+
+**Verification Status:** Round 2 fixes applied, awaiting user testing to confirm 8MB error is resolved.
 
 ### Debug Mode Features
 

@@ -24,8 +24,8 @@ class EvidenceCollector {
 
     this.initialized = false;
     this.initPromise = this.initialize();
-    this.MAX_CACHE_SIZE = 50; // Reduced from 100 - debug mode adds more data per request
-    this.MAX_TIMELINE = 500;
+    this.MAX_CACHE_SIZE = 25; // Reduced from 50 - debug mode adds much more data per request
+    this.MAX_TIMELINE = 100; // Reduced from 500 - timeline events can be very large with debug data
 
     // SECURITY FIX P2-NEW: Storage schema versioning
     this.SCHEMA_VERSION = 1;
@@ -421,7 +421,7 @@ class EvidenceCollector {
     }
 
     // Clean up Maps that can grow unbounded
-    const MAX_FLOW_CORRELATION = 100;
+    const MAX_FLOW_CORRELATION = 50; // Reduced from 100 - flow objects can be large
     if (this._flowCorrelation.size > MAX_FLOW_CORRELATION) {
       const beforeSize = this._flowCorrelation.size;
       const entries = Array.from(this._flowCorrelation.entries()).slice(-MAX_FLOW_CORRELATION);
@@ -430,7 +430,7 @@ class EvidenceCollector {
       cleaned = true;
     }
 
-    const MAX_ACTIVE_FLOWS = 50;
+    const MAX_ACTIVE_FLOWS = 25; // Reduced from 50 - active flows include full request data
     if (this._activeFlows.size > MAX_ACTIVE_FLOWS) {
       const beforeSize = this._activeFlows.size;
       const entries = Array.from(this._activeFlows.entries()).slice(-MAX_ACTIVE_FLOWS);
@@ -439,9 +439,9 @@ class EvidenceCollector {
       cleaned = true;
     }
 
-    if (this._proofOfConcepts.length > 50) {
+    if (this._proofOfConcepts.length > 25) { // Reduced from 50 - POCs can be large
       const beforeSize = this._proofOfConcepts.length;
-      this._proofOfConcepts = this._proofOfConcepts.slice(-50);
+      this._proofOfConcepts = this._proofOfConcepts.slice(-25);
       console.log(`Hera: Cleaned POCs: ${beforeSize} → ${this._proofOfConcepts.length}`);
       cleaned = true;
     }
