@@ -32,8 +32,10 @@ export class ResponseBodyCapturer {
     this.evidenceCollector = evidenceCollector;
     this.refreshTokenTracker = refreshTokenTracker;
     this.activeDebuggees = new Map(); // tabId -> debuggee
-    this.requestIdMap = new Map(); // debugger requestId -> webRequest requestId
     this.enabled = false;
+    this.captureRateLimiter = new Map(); // domain -> { count, windowStart }
+    this.MAX_CAPTURES_PER_DOMAIN = 10; // captures per minute
+    this.RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
 
     // URL patterns that indicate auth-related responses needing body capture
     this.authResponsePatterns = [
@@ -66,6 +68,14 @@ export class ResponseBodyCapturer {
       /\.okta\.com.*\/oauth2\/.*\/token/i,
       /\.okta\.com.*\/api\/v1\/authn/i,
     ];
+
+    // Register onDetach listener once for all tabs
+    chrome.debugger.onDetach.addListener((source, reason) => {
+      if (this.activeDebuggees.has(source.tabId)) {
+        console.log(`[ResponseCapture] Debugger detached from tab ${source.tabId}: ${reason}`);
+        this.activeDebuggees.delete(source.tabId);
+      }
+    });
   }
 
   /**
@@ -159,13 +169,6 @@ export class ResponseBodyCapturer {
       }
     });
 
-    // Handle debugger detach (user closes DevTools or tab closes)
-    chrome.debugger.onDetach.addListener((source, reason) => {
-      if (source.tabId === debuggee.tabId) {
-        console.log(`[ResponseCapture] Debugger detached from tab ${debuggee.tabId}: ${reason}`);
-        this.activeDebuggees.delete(debuggee.tabId);
-      }
-    });
   }
 
   /**
@@ -248,8 +251,12 @@ export class ResponseBodyCapturer {
             }
           }
         } catch (error) {
-          // Not JSON or parsing failed - skip token tracking
-          console.debug(`[ResponseCapture] Response body not JSON, skipping token tracking`);
+          if (error instanceof SyntaxError) {
+            // Not JSON or parsing failed - skip token tracking
+            console.debug(`[ResponseCapture] Response body not JSON, skipping token tracking`);
+          } else {
+            console.error('[ResponseCapture] Unexpected error during token tracking:', error);
+          }
         }
 
         // NOW apply redaction for storage
@@ -296,8 +303,13 @@ export class ResponseBodyCapturer {
   _isAuthResponse(url) {
     try {
       const urlLower = url.toLowerCase();
-      return this.authResponsePatterns.some(pattern => pattern.test(urlLower));
+      const matches = this.authResponsePatterns.some(pattern => pattern.test(urlLower));
+      if (!matches) {
+        return false;
+      }
+      return this._checkRateLimit(url);
     } catch (error) {
+      console.warn('[ResponseCapture] Failed auth response check:', error.message);
       return false;
     }
   }
@@ -310,8 +322,8 @@ export class ResponseBodyCapturer {
    *
    * CRITICAL FIX: Now uses best-match algorithm to handle duplicate URLs
    */
-  _findWebRequestId(url, responseHeaders, responseTime = null) {
-    const now = responseTime || Date.now();
+  _findWebRequestId(url, responseHeaders) {
+    const now = Date.now();
     const matchWindow = 5000; // 5 second window
 
     let bestMatch = null;
@@ -339,6 +351,40 @@ export class ResponseBodyCapturer {
     }
 
     return bestMatch;
+  }
+
+  /**
+   * Prevent malicious pages from flooding capture pipeline
+   */
+  _checkRateLimit(url) {
+    try {
+      const domain = new URL(url).hostname;
+      const now = Date.now();
+
+      if (!this.captureRateLimiter.has(domain)) {
+        this.captureRateLimiter.set(domain, { count: 1, windowStart: now });
+        return true;
+      }
+
+      const limiter = this.captureRateLimiter.get(domain);
+
+      if (now - limiter.windowStart > this.RATE_LIMIT_WINDOW) {
+        limiter.count = 1;
+        limiter.windowStart = now;
+        return true;
+      }
+
+      if (limiter.count >= this.MAX_CAPTURES_PER_DOMAIN) {
+        console.warn(`[ResponseCapture] Rate limit exceeded for ${domain} (${limiter.count} captures in the last minute)`);
+        return false;
+      }
+
+      limiter.count += 1;
+      return true;
+    } catch (error) {
+      console.warn('[ResponseCapture] Rate limiter error:', error.message);
+      return false;
+    }
   }
 
   /**

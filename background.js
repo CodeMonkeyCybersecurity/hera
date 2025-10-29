@@ -43,6 +43,9 @@ import { SCIMAnalyzer } from './modules/auth/scim-analyzer.js';
 import { ResponseBodyCapturer } from './modules/response-body-capturer.js';
 import { RefreshTokenTracker } from './modules/auth/refresh-token-tracker.js';
 
+// ==================== DEBUG MODE ====================
+import { DebugModeManager } from './modules/debug-mode-manager.js';
+
 // ==================== INFRASTRUCTURE MODULES ====================
 import { storageManager } from './modules/storage-manager.js';
 import { memoryManager } from './modules/memory-manager.js';
@@ -252,6 +255,9 @@ const authRequests = new Proxy(memoryManager.authRequests, {
 const refreshTokenTracker = new RefreshTokenTracker();
 const responseBodyCapturer = new ResponseBodyCapturer(authRequests, evidenceCollector, refreshTokenTracker);
 
+// Initialize Debug Mode Manager
+const debugModeManager = new DebugModeManager();
+
 const debugTargetsWrapperCache = new Map();
 const debugTargets = new Proxy(memoryManager.debugTargets, {
   get(target, prop) {
@@ -354,7 +360,8 @@ const webRequestListeners = new WebRequestListeners(
   sessionSecurityAnalyzer,
   scimAnalyzer,
   responseBodyCapturer,
-  refreshTokenTracker
+  refreshTokenTracker,
+  debugModeManager
 );
 
 // Initialize debugger events
@@ -385,6 +392,90 @@ const messageRouter = new MessageRouter(
 // Register all handlers
 debuggerEvents.register();
 messageRouter.register();
+
+// ==================== DEBUG MODE MESSAGE HANDLERS ====================
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Only process debug mode messages
+  if (!message.action || !message.action.includes('Debug')) {
+    return false; // Let other handlers process
+  }
+
+  // Validate sender
+  if (!sender.id || sender.id !== chrome.runtime.id) {
+    console.warn('[DebugMode] Message from external source rejected');
+    sendResponse({ success: false, error: 'External messages not allowed' });
+    return false;
+  }
+
+  // Handle debug mode actions
+  (async () => {
+    try {
+      switch (message.action) {
+        case 'enableDebugMode':
+          if (!message.domain) {
+            sendResponse({ success: false, error: 'Domain required' });
+            return;
+          }
+          await debugModeManager.enable(message.domain, message.tabId);
+          console.log(`[DebugMode] Enabled for ${message.domain}`);
+          sendResponse({ success: true });
+          break;
+
+        case 'disableDebugMode':
+          if (!message.domain) {
+            sendResponse({ success: false, error: 'Domain required' });
+            return;
+          }
+          await debugModeManager.disable(message.domain);
+          console.log(`[DebugMode] Disabled for ${message.domain}`);
+          sendResponse({ success: true });
+          break;
+
+        case 'getDebugSession':
+          if (!message.domain) {
+            sendResponse({ success: false, error: 'Domain required' });
+            return;
+          }
+          const session = debugModeManager.getSession(message.domain);
+          sendResponse({ success: true, session });
+          break;
+
+        case 'exportDebugSession':
+          if (!message.domain) {
+            sendResponse({ success: false, error: 'Domain required' });
+            return;
+          }
+          const format = message.format || 'enhanced';
+          let data;
+          if (format === 'har') {
+            data = debugModeManager.exportHAR(message.domain);
+          } else {
+            data = debugModeManager.exportEnhanced(message.domain);
+          }
+          sendResponse({ success: true, data });
+          break;
+
+        case 'clearDebugSession':
+          if (!message.domain) {
+            sendResponse({ success: false, error: 'Domain required' });
+            return;
+          }
+          debugModeManager.clearSession(message.domain);
+          sendResponse({ success: true });
+          break;
+
+        default:
+          sendResponse({ success: false, error: 'Unknown debug action' });
+      }
+    } catch (error) {
+      console.error(`[DebugMode] Error handling ${message.action}:`, error);
+      sendResponse({ success: false, error: error.message });
+    }
+  })();
+
+  return true; // Async response
+});
 
 async function initializeWebRequestListeners() {
   return await webRequestListeners.initialize();

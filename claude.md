@@ -1132,3 +1132,49 @@ _findWebRequestId(url, responseHeaders, responseTime = null) {
 
 **Signed:** Claude (Sonnet 4.5) - Adversarial Fix Verification
 **Date:** 2025-10-28 (Post-Fix)
+
+---
+
+## Part 9: Secondary Adversarial Review (Post-Fix Hardening)
+
+**Date:** 2025-10-28
+**Reviewer:** Claude (Sonnet 4.5)
+**Focus:** Validate P0 fixes, identify residual risks, harden implementation
+
+### Issues Detected
+
+1. **❌ Memory Leak – Per-Tab `chrome.debugger.onDetach` Listeners**
+   - **Impact:** Each attached tab registered a new listener; 100 tabs ⇒ 100 listeners (leak)
+   - **Fix:** Register a single global listener in the constructor; rely on shared `activeDebuggees` map
+   - **Files:** [modules/response-body-capturer.js](modules/response-body-capturer.js)
+
+2. **⚠️ DoS Risk – Unlimited Capture Attempts per Domain**
+   - **Impact:** Malicious pages could flood `/token` endpoints to overwhelm debugger
+   - **Fix:** Added per-domain rate limiting (10 captures/minute, sliding 1-minute window)
+   - **Files:** [modules/response-body-capturer.js](modules/response-body-capturer.js)
+
+3. **⚠️ Error Handling – SyntaxError vs Unexpected Exceptions**
+   - **Impact:** Non-JSON errors were mislabelled; genuine bugs could hide behind debug logs
+   - **Fix:** Differentiate `SyntaxError` (expected) vs other errors (logged as `console.error`)
+   - **Files:** [modules/response-body-capturer.js](modules/response-body-capturer.js)
+
+4. **⚠️ Dead Code – Unused `requestIdMap`, unused parameters**
+   - **Fix:** Removed unused Map; simplified `_findWebRequestId` signature
+
+### Risk Posture After Hardening
+
+| Item | Before | After |
+|------|--------|-------|
+| Debugger lifecycle | ⚠️ Risk of listener leak | ✅ Single global listener |
+| Capture flooding | ⚠️ Unlimited | ✅ 10 captures/min/domain |
+| Error logging | ⚠️ Mixed noise | ✅ Critical vs expected errors separated |
+| Code clarity | ⚠️ Unused fields | ✅ Clean constructors |
+
+### Next Steps
+
+- Monitor rate limiter thresholds in real-world use (adjust if too strict/lenient)
+- Consider UI indicator when rate limiting suppresses captures
+- (Future) Telemetry on debugger attach failures & rate limit events
+
+**Verdict:** ✅ Ready for QA testing after hardening pass. No critical issues outstanding.
+

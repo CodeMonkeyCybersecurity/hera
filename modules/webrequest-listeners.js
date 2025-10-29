@@ -19,7 +19,8 @@ export class WebRequestListeners {
     sessionSecurityAnalyzer = null,
     scimAnalyzer = null,
     responseBodyCapturer = null,
-    refreshTokenTracker = null
+    refreshTokenTracker = null,
+    debugModeManager = null
   ) {
     this.heraReady = heraReady;
     this.authRequests = authRequests;
@@ -34,6 +35,7 @@ export class WebRequestListeners {
     this.scimAnalyzer = scimAnalyzer;
     this.responseBodyCapturer = responseBodyCapturer;
     this.refreshTokenTracker = refreshTokenTracker;
+    this.debugModeManager = debugModeManager;
   }
 
   /**
@@ -108,6 +110,23 @@ export class WebRequestListeners {
                   console.debug('[Auth] Response body capturer attachment failed:', error.message);
                   // Don't block request processing - response body capture is optional
                 });
+            }
+
+            // DEBUG MODE: Record enhanced request data
+            if (this.debugModeManager) {
+              this.debugModeManager.isEnabled(domain).then(enabled => {
+                if (enabled) {
+                  this.debugModeManager.recordRequest(domain, {
+                    requestId: details.requestId,
+                    timestamp: Date.now(),
+                    url: details.url,
+                    method: details.method,
+                    type: details.type,
+                    tabId: details.tabId,
+                    requestBody: this.decodeRequestBody(details.requestBody)
+                  });
+                }
+              });
             }
           }
         } catch (error) {
@@ -204,6 +223,24 @@ export class WebRequestListeners {
           }
 
           this.authRequests.set(details.requestId, requestData);
+
+          // DEBUG MODE: Record response data
+          if (this.debugModeManager) {
+            try {
+              const domain = new URL(details.url).hostname;
+              this.debugModeManager.isEnabled(domain).then(enabled => {
+                if (enabled) {
+                  this.debugModeManager.recordRequest(domain, {
+                    requestId: details.requestId,
+                    statusCode: details.statusCode,
+                    responseHeaders: details.responseHeaders
+                  });
+                }
+              });
+            } catch (error) {
+              // Ignore URL parsing errors
+            }
+          }
         }
       },
       { urls: ["<all_urls>"] },
@@ -245,8 +282,27 @@ export class WebRequestListeners {
             statusCode: details.statusCode,
             timestamp: Date.now()
           });
-          
+
           this.authRequests.set(details.requestId, requestData);
+
+          // DEBUG MODE: Record redirect
+          if (this.debugModeManager) {
+            try {
+              const domain = new URL(details.url).hostname;
+              this.debugModeManager.isEnabled(domain).then(enabled => {
+                if (enabled) {
+                  this.debugModeManager.recordRedirect(domain, {
+                    from: details.url,
+                    to: details.redirectUrl,
+                    statusCode: details.statusCode,
+                    headers: details.responseHeaders
+                  });
+                }
+              });
+            } catch (error) {
+              // Ignore URL parsing errors
+            }
+          }
         }
       },
       { urls: ["<all_urls>"] }

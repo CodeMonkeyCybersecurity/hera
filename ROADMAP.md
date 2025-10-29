@@ -305,6 +305,16 @@ Adversarial analysis revealed 3 critical bugs that prevented P0-A and P0-B from 
    - Handles duplicate simultaneous requests to same URL
    - **Files:** [response-body-capturer.js:313-342](modules/response-body-capturer.js#L313-342)
 
+7. **Debugger Lifecycle Safety**
+   - Global `chrome.debugger.onDetach` listener registered once
+   - Prevents per-tab listener leaks when analyzing many tabs
+   - **Files:** [modules/response-body-capturer.js:72-78](modules/response-body-capturer.js#L72-L78)
+
+8. **Capture Rate Limiting**
+   - Per-domain rate limiting (10 captures/min, 1-minute window)
+   - Mitigates malicious request flooding/DOS
+   - **Files:** [modules/response-body-capturer.js:36-38](modules/response-body-capturer.js#L36-L38), [modules/response-body-capturer.js:359-388](modules/response-body-capturer.js#L359-L388)
+
 **Testing:**
 - See [P0_INTEGRATION_TESTS.md](P0_INTEGRATION_TESTS.md) for comprehensive test plan
 - Manual tests: Microsoft OAuth2, Google OAuth2, GitHub OAuth2
