@@ -26,10 +26,11 @@
   "author": "Code Monkey Cybersecurity",
   "license": "UNLICENSED",
   "private": true,
+  "dependencies": {
+    "ae-cvss-calculator": "^1.0.0"
+  },
   "devDependencies": {
     "eslint": "^8.57.0",
-    "eslint-plugin-chrome-extension": "^1.0.1",
-    "eslint-plugin-webextensions": "^0.7.0",
     "nodemon": "^3.0.2"
   },
   "engines": {

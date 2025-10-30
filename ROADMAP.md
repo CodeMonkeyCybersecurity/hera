@@ -641,24 +641,26 @@ class EvidenceExporter {
 ---
 
 ### P1-5: RFC 9700 (OAuth 2.1) Compliance ⭐ NEW
-**Status:** PLANNED → **BLOCKED** ⚠️
+**Status:** PLANNED → **UNBLOCKED** ✅ (P0 prerequisites complete)
 **Priority:** CRITICAL
-**Timeline:** Week 2-3 → **Week 3-6** (includes P0 prerequisites)
+**Timeline:** **4-6 weeks** (realistic estimate with testing and integration)
 **Standards:** RFC 9700, RFC 9449 (DPoP), RFC 8707 (Resource Indicators)
 
-**⚠️ BLOCKERS (See CLAUDE.md Part 7):**
-1. **Response body capture required** - DPoP JWT validation needs response bodies (not implemented)
-2. **Secure token tracking needed** - Refresh rotation tracking conflicts with current redaction
-3. **DPoP severity correction** - Should be INFO (optional), not MEDIUM
-4. **PKCE severity context** - Keep HIGH for public, MEDIUM for confidential (not all HIGH)
+**✅ PREREQUISITES COMPLETE (P0-A, P0-B):**
+1. ✅ Response body capture implemented (chrome.debugger API)
+2. ✅ Secure token tracking implemented (SHA-256 hashing)
+
+**⚠️ IMPLEMENTATION CORRECTIONS REQUIRED:**
+3. **DPoP severity** - Use INFO (optional per RFC 9449), not MEDIUM
+4. **PKCE severity** - Context-dependent: HIGH for public clients, MEDIUM for confidential clients with client_secret
 
 **Goal:** Align Hera with 2025 OAuth security best practices
 
 **What's changing in OAuth 2.1:**
-- PKCE **mandatory** for ALL clients (not just public)
-- Implicit grant completely removed
-- Refresh token rotation required
-- DPoP for sender-constrained tokens
+- PKCE **SHOULD be used** for ALL clients per RFC 9700 (REQUIRED for public, RECOMMENDED for confidential)
+- Implicit grant completely removed (MUST NOT use)
+- Refresh token rotation SHOULD be implemented
+- DPoP for sender-constrained tokens (OPTIONAL enhancement)
 
 **New Detections:**
 
@@ -746,50 +748,56 @@ class EvidenceExporter {
 
 3. **PKCE for ALL Clients (Not Just Public)**
 
-   **⚠️ CORRECTION:** RFC 9700 says PKCE "SHOULD" be used (RFC 2119 = recommended, not required). Keep context-dependent severity.
+   **✅ CORRECTED:** RFC 9700 says PKCE "SHOULD" be used (RFC 2119 = recommended, not required). Using context-dependent severity.
 
    ```javascript
-   // Update existing oauth2-analyzer.js (CORRECTED)
+   // Update existing oauth2-analyzer.js (CORRECTED - READY TO IMPLEMENT)
    detectMissingPKCE(request, clientType, hasClientSecret) {
      const params = this.parseParams(request.url);
      const hasPKCE = params.has('code_challenge');
 
-     // RFC 9700: PKCE SHOULD be used for ALL clients
+     // RFC 9700 Section 2.1.1: PKCE SHOULD be used for ALL clients
      if (!hasPKCE) {
-       // Context-dependent severity
+       // Context-dependent severity (CRITICAL DESIGN DECISION)
        if (clientType === 'public') {
          return {
            type: 'MISSING_PKCE',
-           severity: 'HIGH',  // No other protection
+           severity: 'HIGH',  // REQUIRED for public clients (no client_secret)
            message: 'PKCE missing on public client - authorization code interception possible',
            cwe: 'CWE-523',
            cvss: 7.5,
-           rfcViolation: 'RFC 9700 Section 2.1.1',
+           rfcViolation: 'RFC 9700 Section 2.1.1 (MUST for public clients)',
            evidence: {
              clientType: 'public',
              authEndpoint: request.url,
-             recommendation: 'Implement PKCE (CRITICAL for public clients)'
+             hasCompensatingControl: false,
+             recommendation: 'Implement PKCE immediately - REQUIRED for public clients'
            }
          };
        } else if (clientType === 'confidential' && hasClientSecret) {
          return {
-           type: 'MISSING_PKCE',
-           severity: 'MEDIUM',  // ← Has compensating control
+           type: 'MISSING_PKCE_CONFIDENTIAL',  // Separate finding type
+           severity: 'MEDIUM',  // RECOMMENDED (has client_secret as fallback)
            message: 'PKCE not implemented on confidential client',
-           note: 'RFC 9700 recommends PKCE for all clients. Confidential clients have client secret as compensating control.',
+           note: 'RFC 9700 recommends PKCE for all clients. Confidential clients have client_secret as compensating control.',
            cwe: 'CWE-523',
+           cvss: 5.0,
+           rfcViolation: 'RFC 9700 Section 2.1.1 (SHOULD for confidential clients)',
            evidence: {
              clientType: 'confidential',
              hasCompensatingControl: 'client_secret',
-             recommendation: 'Consider implementing PKCE for defense-in-depth'
+             recommendation: 'Consider implementing PKCE for defense-in-depth per RFC 9700'
            }
          };
        }
      }
    }
    ```
-   - **Update:** PKCE severity remains context-dependent (HIGH for public, MEDIUM for confidential)
-   - **Evidence:** Absence of code_challenge parameter + client type detection
+   - **Severity Rationale:**
+     - PUBLIC client: **HIGH** - PKCE is REQUIRED (no fallback protection)
+     - CONFIDENTIAL client: **MEDIUM** - PKCE is RECOMMENDED (has client_secret)
+   - **Evidence:** Absence of code_challenge parameter + client type inference
+   - **Bug Bounty Alignment:** Context-dependent severity matches industry acceptance rates
 
 4. **Resource Indicators (RFC 8707)**
    ```javascript
@@ -812,21 +820,104 @@ class EvidenceExporter {
    ```
    - **Finding:** "Missing resource indicator - tokens have broad scope" (LOW)
 
+**Implementation Plan:**
+
+**Phase 1 (Week 1-2): DPoP Detection Module**
+
+Create `modules/auth/dpop-validator.js`:
+```javascript
+class DPoPValidator {
+  // Check if DPoP is implemented (INFO severity - optional per RFC 9449)
+  checkDPoPImplementation(request, responseBody) {
+    const hasDPoPHeader = request.headers.some(h => h.name.toLowerCase() === 'dpop');
+    const tokenType = responseBody?.token_type?.toLowerCase();
+    const isDPoP = tokenType === 'dpop';
+
+    if (!isDPoP && this._isPublicClient(request)) {
+      return {
+        type: 'DPOP_NOT_IMPLEMENTED',
+        severity: 'INFO',  // Optional per RFC 9449
+        message: 'DPoP not detected - tokens not sender-constrained',
+        note: 'DPoP is optional. Consider for enhanced security.',
+        evidence: { clientType: 'public', tokenType: tokenType || 'bearer' }
+      };
+    }
+  }
+
+  // Validate DPoP JWT if present
+  validateDPoPJWT(dpopHeader) {
+    // Check: alg, typ, jwk, jti, htm, htu, iat claims
+  }
+}
+```
+
+**Phase 2 (Week 2-3): Refresh Token Rotation**
+
+Enhance `modules/auth/refresh-token-tracker.js` (already exists):
+```javascript
+async trackRefreshToken(tokenResponse, domain) {
+  const hash = await this._hashToken(tokenResponse.refresh_token);
+
+  if (this.seenHashes.has(hash)) {
+    // FINDING: Token not rotated
+    return {
+      type: 'REFRESH_TOKEN_NOT_ROTATED',
+      severity: 'HIGH',  // RFC 9700 violation
+      message: 'Refresh token reused - not rotated after exchange',
+      evidence: {
+        tokenHash: hash.substring(0, 16) + '...',
+        useCount: this.seenHashes.get(hash).count + 1
+      }
+    };
+  }
+
+  this.seenHashes.set(hash, { timestamp: Date.now(), count: 1 });
+  return null; // No finding
+}
+```
+
+**Phase 3 (Week 3): PKCE Context-Dependent Severity**
+
+Update `modules/auth/oauth2-analyzer.js`:
+```javascript
+detectMissingPKCE(request) {
+  const hasPKCE = this.parseParams(request.url).has('code_challenge');
+  if (hasPKCE) return null;
+
+  const clientType = this._inferClientType(request);
+
+  if (clientType === 'public') {
+    return {
+      type: 'MISSING_PKCE',
+      severity: 'HIGH',  // REQUIRED for public clients
+      message: 'PKCE missing - authorization code interception possible'
+    };
+  } else if (clientType === 'confidential') {
+    return {
+      type: 'MISSING_PKCE_CONFIDENTIAL',
+      severity: 'MEDIUM',  // RECOMMENDED (has client_secret)
+      message: 'PKCE not implemented on confidential client',
+      note: 'RFC 9700 recommends PKCE for all clients. Has client_secret as compensating control.'
+    };
+  }
+}
+```
+
 **Files to Create:**
-- `/modules/auth/oauth2-2025-validator.js` - Main RFC 9700 validator
-- `/modules/auth/dpop-validator.js` - DPoP header validation
-- `/modules/auth/refresh-token-tracker.js` - Token rotation tracking
+- `/modules/auth/dpop-validator.js` - DPoP detection and validation
 
 **Files to Update:**
-- `/modules/auth/oauth2-analyzer.js` - Update PKCE severity (MEDIUM → HIGH for all)
-- `/modules/auth/auth-issue-database.js` - Add new issue types
-- `/modules/auth/auth-risk-scorer.js` - Update risk weights
+- `/modules/auth/refresh-token-tracker.js` - Add finding generation (exists, needs enhancement)
+- `/modules/auth/oauth2-analyzer.js` - Context-dependent PKCE severity
+- `/modules/auth/auth-issue-database.js` - Add new finding types
+- `/modules/response-body-capturer.js` - Call DPoP validator after token response
 
 **Success Metrics:**
-- ✅ 100% RFC 9700 required checks implemented
-- ✅ DPoP detection for public clients
-- ✅ Refresh token rotation tracking
-- ✅ PKCE violations flagged for all client types
+- ✅ DPoP detection with INFO severity
+- ✅ Refresh rotation detection (HIGH severity when missing)
+- ✅ PKCE context-dependent (HIGH for public, MEDIUM for confidential)
+- ✅ <5% false positive rate
+- ✅ Bug bounty acceptance rate >85%
 
 ---
 
@@ -1215,9 +1306,16 @@ class BugcrowdVRTMapper {
 
 2. **TOTP/Authenticator App Detection**
 
-   **⚠️ FALSE POSITIVE RISK:** 6-8 digit pattern matches non-TOTP codes (ZIP, order ID, confirmation codes).
+   **⚠️ CRITICAL: FALSE POSITIVE PREVENTION REQUIRED**
 
-   **Solution:** Add context checks before reporting:
+   **Problem:** 6-8 digit pattern matches many non-MFA codes:
+   - ZIP codes (5-6 digits)
+   - Order IDs (6-8 digits)
+   - Confirmation codes (6 digits)
+   - Verification codes (non-MFA)
+   - Phone numbers (partial)
+
+   **Solution (MANDATORY):** Require AT LEAST 2 of 3 context checks before reporting:
 
    ```javascript
    detectTOTP(request, flowContext) {
@@ -1241,9 +1339,14 @@ class BugcrowdVRTMapper {
              h.name.toLowerCase().includes('x-otp')
            );
 
-           // Only report if we have confirming context
-           if (!hasAuthContext && !hasMFAEndpoint && !hasMFAHeaders) {
-             // Likely false positive - don't report
+           // CRITICAL: Require at least 2 context checks to prevent false positives
+           const contextScore = (hasAuthContext ? 1 : 0) +
+                                (hasMFAEndpoint ? 1 : 0) +
+                                (hasMFAHeaders ? 1 : 0);
+
+           if (contextScore < 2) {
+             // Insufficient context - likely false positive (ZIP, order ID, etc.)
+             console.debug(`[MFA] Skipping potential TOTP (context score ${contextScore}/3): ${request.url}`);
              return null;
            }
 
@@ -1406,19 +1509,27 @@ class BugcrowdVRTMapper {
 
 ---
 
-### P2-8: Session Lifecycle Tracking ⭐ NEW
-**Status:** PLANNED → **SCOPE CORRECTION NEEDED** ⚠️
+### P2-8: Session Lifetime Analysis ⭐ NEW (RENAMED)
+**Status:** **SCOPE CORRECTED** ✅ (passive analysis only)
 **Priority:** MEDIUM
-**Timeline:** Week 5-6
+**Timeline:** Week 9-10 (revised)
 **Standards:** OWASP WSTG 2025 (Session Management Testing)
 
-**⚠️ CONTRADICTION IDENTIFIED:** "Session timeout testing" requires active testing (waiting 30+ min, making test requests), but this is in P2 (passive detection).
+**✅ CORRECTED:** Renamed from "Session Lifecycle Tracking" to "Session Lifetime Analysis"
 
-**CORRECTION REQUIRED:** Either:
-- **Option A:** Move inactivity timeout testing to P3-6 (Active Testing) with consent
-- **Option B:** Rename to "Session Lifetime Analysis" - only analyze Max-Age header (passive), don't test behavior
+**Scope Decision:** **Option B selected** - Passive cookie attribute analysis ONLY
 
-**Goal:** Analyze session configuration (passive) - NOT behavior testing
+**What's Analyzed (Passive):**
+- Cookie Max-Age/Expires attributes (absolute timeout)
+- Remember-me token entropy and lifetime
+- Concurrent session detection (via multiple cookie tracking)
+
+**What's NOT Analyzed (Requires Active Testing):**
+- ❌ Inactivity timeout behavior (requires waiting 30+ min + test request)
+- ❌ Session rotation on privilege escalation (requires triggering escalation)
+- ❌ Session validity after logout (requires POST /logout + test request)
+
+**Goal:** Analyze session cookie configuration (passive) - NOT behavior testing
 
 **Passive Analysis Only:**
 
@@ -1836,17 +1947,300 @@ class EvidenceCollector {
 
 ---
 
+## P1 Optimizations - Performance & Code Quality (This Week)
+
+### P1-OPT-1: Optimize Evidence Truncation (Shallow Clone)
+**Priority:** MEDIUM
+**Effort:** 30 minutes
+**Impact:** Reduces memory allocation by ~50% for large requests
+
+**Problem:** Current `_truncateEvidence()` uses `JSON.parse(JSON.stringify(evidence))` for deep cloning, which:
+- Allocates memory for the entire stringified JSON
+- Parses it back into objects
+- Wasteful for objects that only need shallow truncation
+
+**Solution:** Replace with efficient shallow clone:
+```javascript
+_truncateEvidence(evidence) {
+  // Shallow clone instead of deep clone
+  const truncated = { ...evidence };
+
+  // Only deep clone the specific fields that need truncation
+  if (evidence.request?.body?.length > this.MAX_BODY_SIZE) {
+    truncated.request = { ...evidence.request };
+    truncated.request.body = evidence.request.body.substring(0, this.MAX_BODY_SIZE) + '...';
+  }
+
+  if (evidence.response?.body?.length > this.MAX_BODY_SIZE) {
+    truncated.response = { ...evidence.response };
+    truncated.response.body = evidence.response.body.substring(0, this.MAX_BODY_SIZE) + '...';
+  }
+
+  return truncated;
+}
+```
+
+**Files:** [evidence-collector.js:505-548](evidence-collector.js#L505-548)
+
+---
+
+### P1-OPT-2: Add Client Type Inference Confidence Levels
+**Priority:** MEDIUM
+**Effort:** 30 minutes
+**Impact:** Reduces false positives in PKCE detection
+
+**Problem:** Current `_inferClientType()` returns only the type string ('public', 'confidential', 'unknown'), but doesn't indicate confidence level. This can cause:
+- False positives when guessing client type from weak signals
+- Over-confident severity ratings based on uncertain inference
+
+**Solution:** Return confidence tuple:
+```javascript
+_inferClientType(request) {
+  const url = request.url;
+  const body = request.requestBody || '';
+
+  // HIGH confidence: Direct evidence
+  if (body.includes('client_secret=')) {
+    return { type: 'confidential', confidence: 'HIGH' };
+  }
+
+  // MEDIUM confidence: Indirect evidence
+  const redirectUri = this._extractRedirectUri(url);
+  if (redirectUri) {
+    const isLocalhost = /^https?:\\/\\/(localhost|127\\.0\\.0\\.1|::1)/.test(redirectUri);
+    if (isLocalhost) {
+      return { type: 'public', confidence: 'MEDIUM' };
+    }
+  }
+
+  // LOW confidence: Fallback
+  if (url.includes('code_challenge=')) {
+    return { type: 'public', confidence: 'LOW' };
+  }
+
+  return { type: 'unknown', confidence: 'LOW' };
+}
+```
+
+**Usage:**
+```javascript
+const clientInfo = this._inferClientType(request);
+if (clientInfo.type === 'public' && clientInfo.confidence === 'HIGH') {
+  // HIGH severity PKCE missing
+} else if (clientInfo.type === 'public' && clientInfo.confidence === 'MEDIUM') {
+  // MEDIUM severity (not certain)
+}
+```
+
+**Files:** [modules/auth/oauth2-analyzer.js](modules/auth/oauth2-analyzer.js), [modules/auth/dpop-validator.js:224-251](modules/auth/dpop-validator.js#L224-251)
+
+---
+
+## P2 Integration & Testing (Week 2-3)
+
+### P2-INT-1: Integrate DPoP Validator
+**Priority:** HIGH
+**Effort:** 2-3 days
+**Impact:** Implements RFC 9449 DPoP detection per P1-5
+
+**Status:** Module created ✅ ([modules/auth/dpop-validator.js](modules/auth/dpop-validator.js)), but NOT integrated yet
+
+**Integration Points:**
+
+1. **Import in response-body-capturer.js:**
+   ```javascript
+   import { DPoPValidator } from './auth/dpop-validator.js';
+
+   constructor() {
+     this.dpopValidator = new DPoPValidator();
+   }
+   ```
+
+2. **Check token responses for DPoP:**
+   ```javascript
+   async _captureResponseBody(tabId, webRequestId, url) {
+     // ... existing code ...
+
+     if (this._isTokenResponse(url)) {
+       const parsedBody = JSON.parse(responseBody);
+
+       // Check for DPoP implementation
+       const dpopFinding = this.dpopValidator.checkDPoPImplementation(
+         requestData.request,
+         parsedBody
+       );
+
+       if (dpopFinding) {
+         requestData.metadata.findings = requestData.metadata.findings || [];
+         requestData.metadata.findings.push(dpopFinding);
+       }
+     }
+   }
+   ```
+
+3. **Validate DPoP JWT headers in requests:**
+   ```javascript
+   // In webrequest-listeners.js onBeforeSendHeaders
+   const dpopHeader = details.requestHeaders?.find(h => h.name.toLowerCase() === 'dpop');
+   if (dpopHeader) {
+     const dpopFinding = dpopValidator.validateDPoPJWT(dpopHeader.value, {
+       method: details.method,
+       url: details.url
+     });
+
+     if (dpopFinding) {
+       // Add to findings
+     }
+   }
+   ```
+
+**Files to Modify:**
+- [modules/response-body-capturer.js](modules/response-body-capturer.js)
+- [modules/webrequest-listeners.js](modules/webrequest-listeners.js)
+- [evidence-collector.js](evidence-collector.js) (add DPoP to evidence package)
+
+**Testing:**
+- Test with Microsoft OAuth2 (no DPoP) → INFO finding
+- Test with DPoP-enabled server → no finding
+- Test with malformed DPoP JWT → MEDIUM finding
+
+---
+
+### P2-INT-2: Update PKCE Detection (Context-Dependent Severity)
+**Priority:** HIGH
+**Effort:** 2-3 days
+**Impact:** Corrects PKCE severity per RFC 9700 adversarial analysis
+
+**Problem:** Current implementation flags missing PKCE as HIGH severity for all clients, but RFC 9700 says PKCE "SHOULD" be used (recommended, not required). Confidential clients have client_secret as compensating control.
+
+**Solution:** Context-dependent severity:
+
+```javascript
+// In oauth2-analyzer.js or pkce-analyzer.js
+detectMissingPKCE(request, clientInfo) {
+  const hasPKCE = request.url.includes('code_challenge=') ||
+                  request.requestBody?.includes('code_verifier=');
+
+  if (hasPKCE) {
+    return null; // No finding
+  }
+
+  const { type: clientType, confidence } = this._inferClientType(request);
+
+  // Public client missing PKCE = HIGH (no other protection)
+  if (clientType === 'public') {
+    return {
+      type: 'MISSING_PKCE',
+      severity: 'HIGH',
+      confidence: confidence, // Inherit confidence from client type inference
+      message: 'Public client missing PKCE - authorization code vulnerable to interception',
+      cwe: 'CWE-322',
+      rfcReference: 'RFC 9700 Section 1 (PKCE required for public clients)'
+    };
+  }
+
+  // Confidential client missing PKCE = MEDIUM (has client_secret)
+  if (clientType === 'confidential') {
+    return {
+      type: 'MISSING_PKCE',
+      severity: 'MEDIUM',
+      confidence: confidence,
+      message: 'Confidential client missing PKCE - consider implementing for defense-in-depth',
+      note: 'Client secret provides protection, but PKCE is recommended per RFC 9700',
+      cwe: 'CWE-322',
+      rfcReference: 'RFC 9700 Section 1 (PKCE SHOULD be used)'
+    };
+  }
+
+  // Unknown client type = MEDIUM (default to safe side)
+  return {
+    type: 'MISSING_PKCE',
+    severity: 'MEDIUM',
+    confidence: 'LOW',
+    message: 'PKCE not detected - unable to determine client type',
+    note: 'Cannot determine if public or confidential client',
+    cwe: 'CWE-322'
+  };
+}
+```
+
+**Files to Modify:**
+- [modules/auth/oauth2-analyzer.js](modules/auth/oauth2-analyzer.js) (or wherever PKCE detection lives)
+
+**Testing:**
+- Public client (localhost redirect) missing PKCE → HIGH
+- Confidential client (has client_secret) missing PKCE → MEDIUM
+- Unknown client missing PKCE → MEDIUM
+
+---
+
+### P2-TEST-1: Unit Tests for Truncation Logic
+**Priority:** MEDIUM
+**Effort:** 1 day
+**Impact:** Prevents regression of evidence storage fixes
+
+**Test Cases:**
+
+1. **Pre-truncation of large response bodies:**
+   ```javascript
+   test('should truncate response body BEFORE analysis', () => {
+     const largeBody = 'A'.repeat(200000); // 200KB
+     const evidence = evidenceCollector.processResponseBody(requestId, largeBody, url);
+
+     // Body should be truncated to MAX_BODY_SIZE (100KB)
+     expect(evidence.response.body.length).toBeLessThanOrEqual(100000);
+     expect(evidence.response.body).toContain('[TRUNCATED - original size: 200000 bytes]');
+   });
+   ```
+
+2. **Per-request size limit enforcement:**
+   ```javascript
+   test('should enforce MAX_REQUEST_SIZE limit', () => {
+     const largeRequest = {
+       url: 'https://example.com/api',
+       headers: Array(1000).fill({ name: 'X-Header', value: 'value' }), // Large headers
+       body: 'A'.repeat(500000) // 500KB body
+     };
+
+     const evidence = evidenceCollector.addEvidence(largeRequest);
+     const evidenceSize = JSON.stringify(evidence).length;
+
+     expect(evidenceSize).toBeLessThanOrEqual(512000); // MAX_REQUEST_SIZE = 500KB
+   });
+   ```
+
+3. **Session-only debug mode:**
+   ```javascript
+   test('debug mode should NOT persist to chrome.storage', async () => {
+     await debugModeManager.enable('example.com');
+
+     const stored = await chrome.storage.local.get(['debugModeEnabled']);
+     expect(stored.debugModeEnabled).toBeUndefined(); // Should NOT be in storage
+
+     const isEnabled = await debugModeManager.isEnabled('example.com');
+     expect(isEnabled).toBe(true); // Should be in in-memory Set
+   });
+   ```
+
+**Framework:** Jest or Mocha + Chrome extension test harness
+
+**Files to Create:**
+- `tests/evidence-collector.test.js`
+- `tests/debug-mode-manager.test.js`
+
+---
+
 ## P3 Issues - Advanced Features & Optional Enhancements (Months 2-3)
 
 ### P3-6: Active Testing Framework (Opt-In) ⭐ NEW
-**Status:** IDEA → **SCOPE CORRECTION NEEDED** ⚠️
+**Status:** **SCOPE CORRECTED** ✅ (unsafe tests removed)
 **Priority:** LOW (opt-in feature)
-**Timeline:** Month 3
-**⚠️ REQUIRES USER CONSENT**
+**Timeline:** Month 3+
+**⚠️ REQUIRES EXPLICIT USER CONSENT**
 
-**⚠️ UNSAFE TESTS IDENTIFIED:** CSRF token reuse and refresh token rotation tests can cause unintended side effects.
+**✅ CORRECTED:** Unsafe tests (CSRF token reuse, refresh token rotation) have been REMOVED from scope.
 
-**CORRECTED SCOPE:** Only truly safe read-only tests.
+**FINAL SCOPE:** Only truly safe read-only tests that cannot modify application state.
 
 **Goal:** Optional active security testing with explicit user approval
 
@@ -1902,23 +2296,28 @@ class EvidenceCollector {
 - ✅ Read-only endpoints with expired/invalid tokens
 - ✅ No state modification
 
-**User Consent Flow:**
+**User Consent Flow (CORRECTED):**
 ```javascript
-// UI consent dialog
+// UI consent dialog - ONLY safe tests
 const consent = await showConsentDialog({
-  title: 'Hera Active Testing',
-  warning: 'Active testing will send additional requests to the target application.',
+  title: 'Hera Active Testing (EXPERIMENTAL)',
+  warning: 'Active testing will send additional GET requests to the target application.',
   tests: [
-    { id: 'sessionTimeoutTest', name: 'Session Timeout Testing', description: '...' },
-    { id: 'csrfReuseTest', name: 'CSRF Token Reuse Testing', description: '...' },
-    { id: 'refreshRotationTest', name: 'Refresh Token Rotation Testing', description: '...' }
+    {
+      id: 'sessionTimeoutTest',
+      name: 'Session Timeout Testing',
+      description: 'Wait 30 minutes, then send GET request to test if session is still valid',
+      risk: 'LOW - Read-only GET request to /userinfo or similar endpoint'
+    }
+    // REMOVED: csrfReuseTest (UNSAFE - could modify state)
+    // REMOVED: refreshRotationTest (UNSAFE - could invalidate tokens)
   ],
-  disclaimer: 'Only perform active testing on applications you have authorization to test.'
+  disclaimer: 'Only perform active testing on applications you have written authorization to test. Active testing is EXPERIMENTAL and opt-in only.'
 });
 
 if (consent.granted && consent.tests.length > 0) {
-  // Run only consented tests
-  await activeTester.runTests(consent);
+  // Run only safe, consented tests
+  await activeTester.runSafeTests(consent);
 }
 ```
 
@@ -2041,17 +2440,25 @@ Risk Level: LOW
 
 ## Implementation Priority
 
-### Phase 1: Standards Compliance (Weeks 1-4) - CRITICAL
+### Phase 1: Standards Compliance (Weeks 1-6) - CRITICAL ⚠️ REVISED
 
-| Item | Priority | Effort | Impact | Timeline | Standards |
-|------|----------|--------|--------|----------|-----------|
-| **P1-5: RFC 9700 Compliance** ⭐ | CRITICAL | 2 weeks | VERY HIGH | Week 2-3 | RFC 9700, RFC 9449 |
-| **P1-6: CVSS 4.0 Integration** ⭐ | HIGH | 1 week | HIGH | Week 3 | CVSS 4.0 |
-| **P1-7: Bugcrowd VRT Mapping** ⭐ | MEDIUM | 3 days | HIGH | Week 3-4 | Bugcrowd VRT |
-| P1-4: Export Formats (PDF/MD) | HIGH | 1 week | HIGH | Week 4 | N/A |
-| P1-1: Export Notifications | HIGH | 2 days | MEDIUM | Week 1 | N/A |
-| P1-2: Quality Indicators | HIGH | 3 days | MEDIUM | Week 1 | N/A |
-| P1-3: Batch Logs | LOW | 1 day | LOW | Week 1 | N/A |
+**⚠️ TIMELINE REVISED:** +50% buffer added based on P0 implementation experience
+
+| Item | Priority | Effort (Original) | Effort (Revised) | Impact | Timeline | Standards |
+|------|----------|------------------|------------------|--------|----------|-----------|
+| **P1-5: RFC 9700 Compliance** ⭐ | CRITICAL | 2 weeks | **4-6 weeks** | VERY HIGH | Week 1-6 | RFC 9700, RFC 9449 |
+| **P1-6: CVSS 4.0 Integration** ⭐ | HIGH | 1 week | **1 week (with library)** | HIGH | Week 4 | CVSS 4.0 |
+| **P1-7: Bugcrowd VRT Mapping** ⭐ | MEDIUM | 3 days | **1 week** | HIGH | Week 5 | Bugcrowd VRT |
+| P1-4: Export Formats (PDF/MD) | HIGH | 1 week | **1.5 weeks** | HIGH | Week 6 | N/A |
+| P1-1: Export Notifications | HIGH | 2 days | **3 days** | MEDIUM | Week 1 | N/A |
+| P1-2: Quality Indicators | HIGH | 3 days | **1 week** | MEDIUM | Week 2 | N/A |
+| P1-3: Batch Logs | LOW | 1 day | **2 days** | LOW | Week 1 | N/A |
+
+**Rationale for Revisions:**
+- P0 prerequisites took 2 weeks with 3 critical bugs discovered post-implementation
+- Integration complexity consistently underestimated
+- Testing and bug fixing requires additional time
+- False positive tuning (especially for MFA detection) is iterative
 
 **Phase 1 Deliverables:**
 - ✅ Full RFC 9700 compliance (DPoP, refresh rotation, PKCE for all)
@@ -2061,18 +2468,24 @@ Risk Level: LOW
 
 ---
 
-### Phase 2: Enhanced Detection (Weeks 4-8) - HIGH PRIORITY
+### Phase 2: Enhanced Detection (Weeks 6-12) - HIGH PRIORITY ⚠️ REVISED
 
-| Item | Priority | Effort | Impact | Timeline | Standards |
-|------|----------|--------|--------|----------|-----------|
-| **P2-7: Passive MFA Detection** ⭐ | HIGH | 2 weeks | VERY HIGH | Week 4-5 | OWASP WSTG, NIST 800-63B |
-| **P2-8: Session Lifecycle** ⭐ | MEDIUM | 2 weeks | MEDIUM | Week 5-6 | OWASP WSTG |
-| **P2-9: Password Policy** ⭐ | LOW | 1 week | LOW | Week 6-7 | NIST SP 800-63B |
-| P2-1: Timeline Visualization | LOW | 1 week | MEDIUM | Week 7 | N/A |
-| P2-3: Notifications | MEDIUM | 3 days | MEDIUM | Week 4 | N/A |
-| P2-4: Export Preview | LOW | 3 days | LOW | Week 7 | N/A |
-| P2-5: Quality UI | LOW | 1 week | LOW | Week 8 | N/A |
-| P2-6: Storage Degradation | LOW | 1 week | MEDIUM | Week 8 | N/A |
+**⚠️ TIMELINE REVISED:** +50% buffer, starts after Phase 1 completion
+
+| Item | Priority | Effort (Original) | Effort (Revised) | Impact | Timeline | Standards |
+|------|----------|------------------|------------------|--------|----------|-----------|
+| **P2-7: Passive MFA Detection** ⭐ | HIGH | 2 weeks | **3-4 weeks** | VERY HIGH | Week 6-9 | OWASP WSTG, NIST 800-63B |
+| **P2-8: Session Lifecycle** ⭐ | MEDIUM | 2 weeks | **2 weeks (passive only)** | MEDIUM | Week 9-10 | OWASP WSTG |
+| **P2-9: Password Policy** ⭐ | LOW | 1 week | **1.5 weeks** | LOW | Week 10-11 | NIST SP 800-63B |
+| P2-1: Timeline Visualization | LOW | 1 week | **1.5 weeks** | MEDIUM | Week 11 | N/A |
+| P2-3: Notifications | MEDIUM | 3 days | **1 week** | MEDIUM | Week 6 | N/A |
+| P2-4: Export Preview | LOW | 3 days | **1 week** | LOW | Week 11 | N/A |
+| P2-5: Quality UI | LOW | 1 week | **1.5 weeks** | LOW | Week 12 | N/A |
+| P2-6: Storage Degradation | LOW | 1 week | **1.5 weeks** | MEDIUM | Week 12 | N/A |
+
+**Key Revision Notes:**
+- **P2-7 (MFA Detection):** Extended to 3-4 weeks to include extensive false positive testing
+- **P2-8 (Session):** Clarified as passive analysis only (no behavior testing)
 
 **Phase 2 Deliverables:**
 - ✅ MFA detection (WebAuthn/TOTP/SMS + bypass mechanisms)
@@ -2168,12 +2581,66 @@ Risk Level: LOW
 
 #### MFA Detection Rate
 - **Goal:** Detect 90%+ of MFA implementations
-- **Measure:** Manual verification on known MFA sites
-- **Breakdown:**
-  - WebAuthn/FIDO2 detection: 95%+
-  - TOTP/Authenticator app detection: 90%+
-  - SMS OTP detection: 85%+
-  - MFA bypass mechanism detection: 80%+
+- **Measure:** Manual verification on known MFA sites with documented test methodology
+
+**✅ TEST METHODOLOGY (REQUIRED):**
+
+**Test Site Selection (20 sites total):**
+
+1. **WebAuthn/FIDO2 (5 sites):**
+   - GitHub (https://github.com/settings/security)
+   - Google (https://myaccount.google.com/security)
+   - Microsoft (https://account.microsoft.com/security)
+   - Duo (https://duo.com)
+   - Yubico Demo (https://demo.yubico.com/webauthn-technical)
+
+2. **TOTP/Authenticator Apps (10 sites):**
+   - Auth0 Demo (https://auth0.com/learn/2fa-demo)
+   - Okta (https://login.okta.com)
+   - AWS Console (https://console.aws.amazon.com)
+   - Twilio (https://www.twilio.com/login)
+   - Stripe (https://dashboard.stripe.com)
+   - Dropbox (https://www.dropbox.com/login)
+   - Slack (https://slack.com/signin)
+   - GitLab (https://gitlab.com/users/sign_in)
+   - Bitwarden (https://vault.bitwarden.com)
+   - 1Password (https://my.1password.com)
+
+3. **SMS OTP (5 sites):**
+   - Twitter/X (https://twitter.com/login)
+   - Instagram (https://www.instagram.com/accounts/login/)
+   - WhatsApp Web (https://web.whatsapp.com)
+   - PayPal (https://www.paypal.com/signin)
+   - Coinbase (https://www.coinbase.com/signin)
+
+**Testing Procedure:**
+1. Create test accounts on all 20 sites
+2. Enable MFA on each account
+3. Perform complete authentication flow with Hera monitoring
+4. Record detection results (detected/not detected/false positive)
+5. Calculate detection rate: (correctly detected / 20) × 100%
+
+**False Positive Test (50 non-MFA codes):**
+- 10 ZIP codes in address forms
+- 10 order IDs in e-commerce checkouts
+- 10 confirmation codes (non-auth)
+- 10 phone number inputs (last 6-8 digits)
+- 10 verification codes (email/phone, but not for MFA)
+
+**Acceptance Criteria:**
+- **Detection rate:** ≥90% (18/20 sites)
+- **False positive rate:** ≤5% (≤2.5/50 tests)
+- **Context score threshold:** Require ≥2/3 context checks
+
+**Baseline:**
+- Current: 0% (MFA detection not implemented)
+- Target after P2-7: 90%+
+
+**Breakdown:**
+  - WebAuthn/FIDO2 detection: 95%+ (19/20)
+  - TOTP/Authenticator app detection: 90%+ (18/20)
+  - SMS OTP detection: 85%+ (17/20)
+  - MFA bypass mechanism detection: 80%+ (16/20)
 
 #### Session Management Coverage
 - **Goal:** Detect 95% of session security issues

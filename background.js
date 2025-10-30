@@ -394,7 +394,7 @@ const messageRouter = new MessageRouter(
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Only process debug mode messages
-  const debugActions = ['enableDebugMode', 'disableDebugMode', 'getDebugSession', 'exportDebugSession', 'clearDebugSession'];
+  const debugActions = ['enableDebugMode', 'disableDebugMode', 'isDebugModeEnabled', 'getDebugSession', 'exportDebugSession', 'clearDebugSession'];
   if (!message.action || !debugActions.includes(message.action)) {
     return false; // Let other handlers process
   }
@@ -428,6 +428,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await debugModeManager.disable(message.domain);
           console.log(`[DebugMode] Disabled for ${message.domain}`);
           sendResponse({ success: true });
+          break;
+
+        case 'isDebugModeEnabled':
+          if (!message.domain) {
+            sendResponse({ success: false, error: 'Domain required' });
+            return;
+          }
+          const isEnabled = await debugModeManager.isEnabled(message.domain);
+          sendResponse({ success: true, enabled: isEnabled });
           break;
 
         case 'getDebugSession':

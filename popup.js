@@ -51,16 +51,19 @@ document.addEventListener('DOMContentLoaded', () => {
           const url = new URL(tabs[0].url);
           const domain = url.hostname;
 
-          // Check if debug mode is enabled for this domain
-          const result = await chrome.storage.local.get(['debugModeEnabled']);
-          const enabledDomains = result.debugModeEnabled || [];
-          const isEnabled = enabledDomains.includes(domain);
+          // FIX: Check debug mode via message to background (session-only, not chrome.storage)
+          const response = await chrome.runtime.sendMessage({
+            action: 'isDebugModeEnabled',
+            domain: domain
+          });
+
+          const isEnabled = response?.enabled || false;
           debugModeToggle.checked = isEnabled;
 
           // If debug mode is enabled, could open debug window (but don't auto-open on every popup load)
           // User can click toggle to open window if needed
         } catch (error) {
-          console.debug('Could not parse tab URL:', error);
+          console.debug('Could not parse tab URL or check debug mode:', error);
         }
       }
     });

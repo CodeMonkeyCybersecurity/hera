@@ -25,6 +25,41 @@
 
 ---
 
+## Rule of Thumb: Priority Fixes
+
+**When adversarial analysis identifies issues, categorize and handle as:**
+
+- **P0 (Critical):** Fix immediately before any other work
+  - Broken functionality
+  - Security vulnerabilities
+  - Data loss risks
+  - **Action:** Implement in current session, commit immediately
+
+- **P1 (High):** Fix this week
+  - Performance optimizations
+  - Code quality improvements
+  - Non-breaking enhancements
+  - **Action:** Document in ROADMAP.md with specific timeline (Week 1-2)
+
+- **P2 (Medium):** Document in ROADMAP.md, schedule for next sprint
+  - Feature integrations
+  - Nice-to-have optimizations
+  - **Action:** Add to ROADMAP.md under "P2 Integration & Testing"
+
+- **P3 (Low):** Document in ROADMAP.md, defer to future
+  - Advanced features
+  - Long-term improvements
+  - **Action:** Add to ROADMAP.md under "P3 Advanced Features"
+
+**This prevents scope creep and ensures critical issues are addressed first.**
+
+**Example:**
+- User requests adversarial analysis
+- Analysis identifies 10 issues: 3 P0, 2 P1, 3 P2, 2 P3
+- **Response:** Fix 3 P0 immediately, document P1/P2/P3 in ROADMAP.md, commit all changes
+
+---
+
 ## Adversarial Collaboration: Evidence Collection Implementation
 
 **Date:** 2025-10-22
@@ -1658,4 +1693,181 @@ if (isEnabled) {
 - modules/debug-mode-manager.js:293-331 - Broadcasting logic
 
 **Status:** ✅ Separate window with real-time streaming implemented
+
+
+
+## Part 11: Evidence Storage Crisis (8.16 MB Error)
+
+**Date:** 2025-10-30
+**Error:** "Evidence object is 8.16 MB - too large to store!"
+**Severity:** HIGH (degrades UX but not broken)
+
+### Root Causes
+
+1. **Debug Mode Data Duplication**
+   - Request stored in BOTH `authRequests` (persistent) AND `debugSessions` (memory)
+   - 25 requests × 70 KB each = 1.75 MB from debug bloat alone
+   - webrequest-listeners.js:89-103 stores in authRequests
+   - webrequest-listeners.js:119-127 stores in debugSessions (DUPLICATE)
+
+2. **No Per-Request Size Limits**
+   - Size check happens AFTER 8 MB accumulated (too late)
+   - Single 3 MB API response can hit limit after 2-3 requests
+   - Need: MAX_REQUEST_SIZE = 500 KB, MAX_BODY_SIZE = 100 KB
+
+3. **Debug Mode Persistence**
+   - Stored in chrome.storage.local (persists forever)
+   - Should be session-only (in-memory Set)
+
+### Fixes Applied
+
+**FIX #1: Per-Request Size Limits** (CRITICAL - 3-4 hours)
+```javascript
+// evidence-collector.js - Add before captureResponse()
+const MAX_REQUEST_SIZE = 512000; // 500 KB
+const MAX_BODY_SIZE = 100000; // 100 KB
+
+_truncateResponse(responseData, maxSize) {
+  // Keep metadata, truncate bodies to 100 KB
+  // Strip bodies entirely if still over 500 KB
+}
+```
+
+**FIX #2: Session-Only Debug Mode** (HIGH - 2-3 hours)
+```javascript
+// debug-mode-manager.js
+constructor() {
+  this.enabledDomains = new Set(); // In-memory only (not chrome.storage)
+}
+```
+
+**FIX #3: Debug Mode UI Warning** (MEDIUM - 2 hours)
+- Banner when debug mode active: "Evidence limited to 10 requests"
+- Easy toggle to disable
+
+### Expected Impact
+
+- **Before:** 25 requests = 8.16 MB (error)
+- **After FIX #1:** 25 requests = 2-3 MB (okay)
+- **After FIX #1+2:** Debug mode session-only, evidence <3 MB
+
+### Design Decision: Debug Mode Isolation (DEFERRED)
+
+**Option Considered:** Separate debug data from main evidence entirely
+- Debug mode: ONLY record to debugSessions (not authRequests)
+- Normal mode: ONLY record to authRequests (persistent findings)
+
+**Pros:** Eliminates duplication completely
+**Cons:** Debug sessions lose persistent findings, can't export analysis
+
+**Decision:** DEFER - Need user feedback first. FIX #1+2 sufficient for now.
+
+---
+
+
+---
+
+**Implementation Status Update - 2025-10-30**
+
+✅ **FIX #1 and FIX #2 IMPLEMENTED**
+
+**FIX #1: Per-Request Size Limits**
+- Location: evidence-collector.js:30-32, 505-548, 575
+- MAX_REQUEST_SIZE = 500 KB, MAX_BODY_SIZE = 100 KB
+- Truncation applied before caching
+- Graceful degradation: Keep metadata, strip bodies if needed
+
+**FIX #2: Session-Only Debug Mode**
+- Location: debug-mode-manager.js:22-23, 30-31, 44, 73
+- this.enabledDomains = new Set() (in-memory only)
+- Removed chrome.storage.local persistence
+- Added session-only warnings to console
+
+**Expected Impact:**
+- Evidence size: 8.16 MB → <3 MB (even with debug mode)
+- Debug mode: Auto-disabled on browser restart
+- Per-request truncation prevents single large response from bloating cache
+
+**FIX #3:** Deferred - UI warning banner (optional, 2 hours)
+
+---
+
+## Part 12: P1-5 Implementation Kickoff (2025-10-30)
+
+**Status:** READY TO BEGIN (Prerequisites Complete)
+
+### Prerequisites Completed ✅
+
+1. **✅ Evidence Storage Crisis Resolved**
+   - FIX #1: Per-request size limits (500 KB max)
+   - FIX #2: Session-only debug mode
+   - Files: evidence-collector.js, debug-mode-manager.js
+
+2. **✅ CVSS 4.0 Library Installed**
+   - ae-cvss-calculator v1.0.0
+   - File: package.json
+
+3. **✅ Implementation Plan Added to ROADMAP.md**
+   - Phase 1: DPoP detection (Week 1-2)
+   - Phase 2: Refresh rotation findings (Week 2-3)
+   - Phase 3: PKCE context-dependent (Week 3)
+
+4. **✅ DPoP Validator Module Created**
+   - File: modules/auth/dpop-validator.js
+   - Implements INFO severity for optional DPoP
+   - Implements HIGH severity if client registered for DPoP-bound tokens
+   - JWT validation included
+
+5. **✅ Refresh Token Tracker Has Finding Generation**
+   - File: modules/auth/refresh-token-tracker.js
+   - Lines 126-146: REFRESH_TOKEN_NOT_ROTATED finding
+   - HIGH severity, includes use count and timing evidence
+
+### Next Steps (Week 1 - Start Monday)
+
+1. **Integrate DPoP Validator** (2-3 days)
+   - Import in response-body-capturer.js
+   - Call after token response captured
+   - Add to auth-issue-database.js
+
+2. **Test Integration** (1-2 days)
+   - Microsoft OAuth2 (DPoP support TBD)
+   - Auth0 (refresh rotation enabled)
+   - Google (PKCE required)
+
+3. **Update PKCE Detection** (2-3 days)
+   - Context-dependent severity (PUBLIC: HIGH, CONFIDENTIAL: MEDIUM)
+   - Client type inference logic
+   - Add _inferClientType() method
+
+### Timeline (Revised - Realistic)
+
+- **Week 1-2:** DPoP integration + testing
+- **Week 2-3:** PKCE update + integration testing
+- **Week 4:** CVSS 4.0 integration (use ae-cvss-calculator)
+- **Week 5-6:** MFA test suite + false positive testing
+
+**Total: 6 weeks** (matches revised roadmap timeline)
+
+### Risk Assessment
+
+**Low Risk:**
+- ✅ All prerequisites complete
+- ✅ P0 evidence storage fixes applied
+- ✅ DPoP module created with proper severity (INFO not MEDIUM)
+- ✅ Refresh tracker already has finding generation
+
+**Medium Risk:**
+- ⚠️ Client type inference may be inaccurate (public vs confidential)
+- ⚠️ Need extensive testing on real OAuth2 providers
+
+**Mitigation:**
+- Conservative heuristics (if uncertain, don't flag)
+- False positive testing on 5+ OAuth2 providers
+
+---
+
+**Signed:** Claude (Sonnet 4.5) - P1-5 Implementation Kickoff
+**Date:** 2025-10-30
+**Status:** Ready to begin Monday
 

@@ -18,30 +18,30 @@ export class DebugModeManager {
     this.activeDebuggees = new Map(); // tabId → debugger attached
     this.consoleListeners = new Map(); // tabId → listener
     this.debugWindowPorts = new Map(); // domain → port (for real-time streaming)
+
+    // FIX #2: Session-only enabled domains (in-memory only, not persisted)
+    this.enabledDomains = new Set();
   }
 
   /**
    * Check if debug mode is enabled for a domain
+   * FIX #2: Check in-memory Set instead of chrome.storage (session-only)
    */
   async isEnabled(domain) {
-    const result = await chrome.storage.local.get(['debugModeEnabled']);
-    const enabledDomains = result.debugModeEnabled || [];
-    return enabledDomains.includes(domain);
+    return this.enabledDomains.has(domain);
   }
 
   /**
    * Enable debug mode for a domain
+   * FIX #2: Store in-memory only (session-only), not persisted to chrome.storage
    */
   async enable(domain, tabId = null) {
-    console.log(`[DebugMode] Enabling for domain: ${domain}`);
+    console.log(`[DebugMode] Enabling for domain: ${domain} (SESSION-ONLY)`);
+    console.warn('[DebugMode] ⚠️  Debug mode is SESSION-ONLY and will auto-disable on browser restart');
+    console.warn('[DebugMode] ⚠️  Evidence collection limited while debug mode active');
 
-    // Store enabled state
-    const result = await chrome.storage.local.get(['debugModeEnabled']);
-    const enabledDomains = result.debugModeEnabled || [];
-    if (!enabledDomains.includes(domain)) {
-      enabledDomains.push(domain);
-      await chrome.storage.local.set({ debugModeEnabled: enabledDomains });
-    }
+    // FIX #2: Add to in-memory Set (not chrome.storage.local)
+    this.enabledDomains.add(domain);
 
     // Initialize session for this domain
     this.debugSessions.set(domain, {
@@ -64,15 +64,13 @@ export class DebugModeManager {
 
   /**
    * Disable debug mode for a domain
+   * FIX #2: Remove from in-memory Set (no chrome.storage update needed)
    */
   async disable(domain) {
     console.log(`[DebugMode] Disabling for domain: ${domain}`);
 
-    // Remove from enabled domains
-    const result = await chrome.storage.local.get(['debugModeEnabled']);
-    const enabledDomains = result.debugModeEnabled || [];
-    const filtered = enabledDomains.filter(d => d !== domain);
-    await chrome.storage.local.set({ debugModeEnabled: filtered });
+    // FIX #2: Remove from in-memory Set (no chrome.storage update needed)
+    this.enabledDomains.delete(domain);
 
     // Detach debugger from any tabs with this domain
     for (const [tabId, debugInfo] of this.activeDebuggees.entries()) {

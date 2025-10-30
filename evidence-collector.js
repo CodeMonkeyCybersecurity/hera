@@ -27,6 +27,10 @@ class EvidenceCollector {
     this.MAX_CACHE_SIZE = 25; // Reduced from 50 - debug mode adds much more data per request
     this.MAX_TIMELINE = 100; // Reduced from 500 - timeline events can be very large with debug data
 
+    // FIX #1: Per-request size limits to prevent evidence bloat
+    this.MAX_REQUEST_SIZE = 512000; // 500 KB per request
+    this.MAX_BODY_SIZE = 100000; // 100 KB for request/response bodies
+
     // SECURITY FIX P2-NEW: Storage schema versioning
     this.SCHEMA_VERSION = 1;
 
@@ -490,17 +494,92 @@ class EvidenceCollector {
    * @param {Object} requestData - Original request data for correlation
    * @returns {Object} Evidence package
    */
+  /**
+   * FIX #1: Truncate large request/response data to prevent evidence bloat
+   *
+   * Strategy:
+   * 1. Check total size before adding to cache
+   * 2. If > 500 KB, truncate bodies to 100 KB
+   * 3. If still > 500 KB, strip bodies entirely and keep metadata
+   */
+  _truncateEvidence(evidence) {
+    const evidenceSize = JSON.stringify(evidence).length;
+
+    // If under limit, return as-is
+    if (evidenceSize <= this.MAX_REQUEST_SIZE) {
+      return evidence;
+    }
+
+    console.warn(`[Evidence] Request ${evidence.requestId} exceeds ${(this.MAX_REQUEST_SIZE/1024).toFixed(0)} KB (${(evidenceSize/1024).toFixed(0)} KB), truncating...`);
+
+    const truncated = JSON.parse(JSON.stringify(evidence)); // Deep clone
+
+    // Step 1: Truncate response body
+    if (truncated.body && typeof truncated.body === 'string' && truncated.body.length > this.MAX_BODY_SIZE) {
+      const originalSize = truncated.body.length;
+      truncated.body = truncated.body.substring(0, this.MAX_BODY_SIZE) +
+        `\n\n[TRUNCATED - original size: ${originalSize} bytes]`;
+      console.debug(`[Evidence] Truncated response body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
+    }
+
+    // Step 2: Truncate request body if present
+    if (truncated.requestData?.requestBody && truncated.requestData.requestBody.length > this.MAX_BODY_SIZE) {
+      const originalSize = truncated.requestData.requestBody.length;
+      truncated.requestData.requestBody = truncated.requestData.requestBody.substring(0, this.MAX_BODY_SIZE) +
+        `\n\n[TRUNCATED - original size: ${originalSize} bytes]`;
+      console.debug(`[Evidence] Truncated request body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
+    }
+
+    // Step 3: Check size again after truncation
+    const newSize = JSON.stringify(truncated).length;
+    if (newSize > this.MAX_REQUEST_SIZE) {
+      console.warn(`[Evidence] Request still too large after truncation: ${(newSize/1024).toFixed(0)} KB, stripping bodies entirely`);
+      // Last resort: Keep metadata only
+      delete truncated.body;
+      if (truncated.requestData) {
+        delete truncated.requestData.requestBody;
+        delete truncated.requestData.responseBody;
+      }
+      truncated.truncated = true;
+      truncated.truncationReason = 'Exceeded 500 KB limit after body truncation';
+    }
+
+    return truncated;
+  }
+
   captureResponse(requestId, responseHeaders, responseBody, statusCode, requestData = null) {
     const timestamp = Date.now();
     const requestUrl = requestData?.url || null;
 
-    const evidence = {
+    // P0 FIX: Truncate response body BEFORE creating evidence object
+    // This prevents memory bloat from analyzing large bodies
+    let truncatedBody = responseBody;
+    if (responseBody && typeof responseBody === 'string' && responseBody.length > this.MAX_BODY_SIZE) {
+      const originalSize = responseBody.length;
+      truncatedBody = responseBody.substring(0, this.MAX_BODY_SIZE) +
+        `\n\n[TRUNCATED - original size: ${originalSize} bytes]`;
+      console.debug(`[Evidence] Pre-truncated response body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
+    }
+
+    // Truncate request body if present
+    let truncatedRequestData = requestData;
+    if (requestData?.requestBody && requestData.requestBody.length > this.MAX_BODY_SIZE) {
+      const originalSize = requestData.requestBody.length;
+      truncatedRequestData = {
+        ...requestData,
+        requestBody: requestData.requestBody.substring(0, this.MAX_BODY_SIZE) +
+          `\n\n[TRUNCATED - original size: ${originalSize} bytes]`
+      };
+      console.debug(`[Evidence] Pre-truncated request body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
+    }
+
+    let evidence = {
       requestId,
       timestamp,
       headers: responseHeaders || [],
-      body: responseBody,
+      body: truncatedBody,  // Use pre-truncated body
       statusCode,
-      requestData,
+      requestData: truncatedRequestData,  // Use pre-truncated request data
       evidence: {
         hstsPresent: this.checkHSTSHeader(responseHeaders, requestUrl),
         securityHeaders: this.analyzeSecurityHeaders(responseHeaders),
@@ -509,10 +588,13 @@ class EvidenceCollector {
         cacheControl: this.extractCacheControl(responseHeaders)
       },
       analysis: {
-        vulnerabilities: this.analyzeForVulnerabilities(responseHeaders, responseBody, statusCode),
+        vulnerabilities: this.analyzeForVulnerabilities(responseHeaders, truncatedBody, statusCode),  // Use truncated body
         flowContext: this.correlateWithFlow(requestId, requestData)
       }
     };
+
+    // FIX #1: Final size check - truncate entire evidence if still too large
+    evidence = this._truncateEvidence(evidence);
 
     // Store in cache for correlation
     this.responseCache.set(requestId, evidence);
