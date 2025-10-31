@@ -2205,3 +2205,135 @@ class EvidenceCollector {
 **Date:** 2025-10-30
 **Verdict:** ✅ ALL P0 FIXES VERIFIED - READY FOR PRODUCTION
 
+
+### Analysis Section 5: Cryptographic Validation
+
+#### Step 5.1: JWT Signature Verification
+
+**Adversarial Question:** "Does Hera validate JWT signatures?"
+
+**Answer:** ❌ NO - Hera only DECODES JWTs, does not verify signatures
+
+**Evidence:**
+- No `crypto.subtle` calls in jwt-validator.js
+- No signature verification logic
+- Only detects algorithm confusion (alg=none, RS256→HS256)
+
+**Why This Is Actually CORRECT:**
+
+Hera is a **monitoring tool**, not an **authentication library**. Signature verification requires:
+1. Access to signing keys (public keys / JWKS endpoints)
+2. Network requests to fetch keys
+3. Complex key management
+4. **Problem:** False sense of security if Hera says "JWT valid" but user's app doesn't verify
+
+**Best Practice:** Report JWT structure/algorithm issues, let application verify signatures
+
+**Verdict Section 5.1:** ✅ CORRECT DESIGN - Monitoring tool should not perform cryptographic verification
+
+---
+
+### Final Verdict & Critical Recommendations
+
+**Overall Grade:** B+ (Strong foundation, 5 critical gaps to address)
+
+---
+
+## Critical Gaps Summary (Priority Order)
+
+### 1. ❌ CRITICAL: DPoP Detection Non-Functional
+**Status:** Module exists but not integrated
+**Impact:** Missing RFC 9449 compliance, cannot detect DPoP-protected flows
+**Fix:** Integrate dpop-validator.js per ROADMAP.md P2-INT-1
+**Effort:** 2-3 days
+**Priority:** **P0** (upgrade from P2 - this is a detection failure)
+
+### 2. ❌ CRITICAL: PKCE Severity Not RFC 9700 Compliant
+**Status:** All missing PKCE flagged as CRITICAL (should be context-dependent)
+**Impact:** False positives on confidential clients, bug bounty rejections
+**Fix:** Implement client type inference + context-dependent severity per ROADMAP.md P2-INT-2
+**Effort:** 2-3 days
+**Priority:** **P1** (upgrade from P2 - RFC compliance issue)
+
+### 3. ⚠️ HIGH: Refresh Token Rotation Findings Hidden
+**Status:** Detection works, findings not surfaced to UI
+**Impact:** Users unaware of HIGH severity rotation violations
+**Fix:** Add REFRESH_TOKEN_NOT_ROTATED to issue database + render in popup
+**Effort:** 1 day
+**Priority:** **P1** (quick win - detection already works)
+
+### 4. ⚠️ HIGH: Debugger Permission Too Broad
+**Status:** Granted at install time for ALL tabs
+**Impact:** If Hera compromised, attacker can access all tabs
+**Fix:** Request debugger permission on-demand per tab
+**Effort:** 1 day
+**Priority:** **P1** (security hardening)
+
+### 5. ⚠️ MEDIUM: Content Script on Every Page
+**Status:** Runs on <all_urls> even for non-auth pages
+**Impact:** Performance overhead, increased attack surface
+**Fix:** Lazy injection via chrome.scripting.executeScript when auth detected
+**Effort:** 2-3 days
+**Priority:** **P2** (optimization, not critical)
+
+---
+
+## Strengths to Maintain
+
+1. **✅ EXCELLENT:** WebAuthn interception (MAIN world, challenge reuse detection)
+2. **✅ EXCELLENT:** Memory management post-P0 (75-85% reduction)
+3. **✅ EXCELLENT:** Evidence-based approach (no guessing/heuristics)
+4. **✅ EXCELLENT:** OAuth2 state entropy analysis (Shannon entropy calculation)
+5. **✅ GOOD:** Session-only debug mode (no persistence)
+6. **✅ GOOD:** Refresh token tracking via secure hashing (SHA-256)
+
+---
+
+## Implementation Priority Matrix
+
+| Priority | Item | RFC/Standard | Effort | Impact |
+|----------|------|--------------|--------|--------|
+| **P0** | Integrate DPoP validator | RFC 9449 | 2-3 days | Detection capability |
+| **P1** | Fix PKCE severity | RFC 9700 | 2-3 days | False positive reduction |
+| **P1** | Surface rotation findings | RFC 9700 | 1 day | User visibility |
+| **P1** | Scope debugger permission | Chrome Security | 1 day | Attack surface reduction |
+| **P2** | Lazy content script | Performance | 2-3 days | Optimization |
+
+**Total Estimated Effort:** 8-11 days to address all P0-P1 gaps
+
+---
+
+## Testing Recommendations
+
+**Before marking complete, test against:**
+
+1. **Microsoft Entra ID** (Azure AD)
+   - Test: OAuth2 with PKCE (public client)
+   - Test: OAuth2 without PKCE (confidential client)
+   - Test: DPoP-enabled flow (if available)
+
+2. **Google Identity**
+   - Test: OAuth2 with PKCE
+   - Test: Refresh token rotation
+
+3. **Auth0**
+   - Test: Refresh token rotation enabled/disabled
+   - Test: WebAuthn challenge validation
+
+4. **GitHub OAuth**
+   - Test: State parameter entropy
+   - Test: PKCE implementation
+
+**Success Criteria:**
+- ✅ DPoP detection working (if provider supports)
+- ✅ PKCE severity context-dependent (HIGH for public, MEDIUM for confidential)
+- ✅ Refresh rotation findings visible in UI
+- ✅ No false positives on valid confidential client flows
+
+---
+
+**Signed:** Claude (Sonnet 4.5) - Comprehensive Adversarial Analysis
+**Date:** 2025-10-30
+**Verdict:** ✅ STRONG FOUNDATION, 5 CRITICAL GAPS TO ADDRESS
+**Recommendation:** Prioritize P0 (DPoP integration) + P1 (PKCE severity, rotation UI, debugger scoping)
+

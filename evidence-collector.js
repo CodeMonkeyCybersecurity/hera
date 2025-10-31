@@ -800,9 +800,9 @@ class EvidenceCollector {
    * PHASE 6 ENHANCEMENT: Now includes preload list checking with fact-based reporting
    * @param {Array} headers - Response headers
    * @param {string} url - Request URL to verify HTTPS usage
-   * @returns {Promise<Object>} HSTS analysis with preload check
+   * @returns {Object} HSTS analysis with preload check
    */
-  async checkHSTSHeader(headers, url = null) {
+  checkHSTSHeader(headers, url = null) {
     if (!headers) return { present: false, reason: 'no_headers' };
 
     // CRITICAL: HSTS is meaningless on HTTP connections
