@@ -136,7 +136,22 @@ export async function runComprehensiveAnalysis() {
 
     // 5. Calculate risk score - DISABLED (no findings from content scripts)
     console.log('Hera: Content script analysis disabled - auth detection handled by background.js');
-    const scoreData = { score: 0, grade: 'N/A', message: 'Auth-only mode' };
+    const baseScoreValue = 0;
+    const scoreData = {
+      total: baseScoreValue,
+      overallScore: baseScoreValue,
+      normalized: baseScoreValue,
+      score: baseScoreValue,
+      grade: 'N/A',
+      message: 'Auth-only mode',
+      summary: 'Authentication monitoring active; frontend detectors disabled in auth-only mode.',
+      riskLevel: 'unknown',
+      totalFindings: allFindings.length,
+      criticalIssues: 0,
+      highIssues: 0,
+      mediumIssues: 0,
+      lowIssues: 0
+    };
 
     console.log(`Hera: Analysis complete - ${allFindings.length} findings, grade: ${scoreData.grade}`);
 

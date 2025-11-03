@@ -730,26 +730,30 @@ export class MessageRouter {
    * Stores analysis results from content script
    */
   handleAnalysisComplete(message, sendResponse) {
-    if (!message.url || !message.score) {
-      console.error('[Analysis] Missing required fields (url or score)');
+    if (!message.url) {
+      console.error('[Analysis] Missing required field: url');
       sendResponse({ success: false, error: 'Invalid analysis data' });
       return false;
     }
 
     // P0 FIX: Human-friendly summary with actual findings
     const domain = new URL(message.url).hostname;
-    const score = message.score;
-    const findingsCount = message.findings?.length || 0;
+    const findings = message.findings || [];
+    const normalizedScore = this.normalizeAnalysisScore(message.score, findings);
+    const totalScore = Number.isFinite(normalizedScore.total) ? normalizedScore.total : null;
+    const findingsCount = findings.length;
 
     // Calculate risk rating
-    let rating = 'EXCELLENT';
-    if (score.total < 90) rating = 'GOOD';
-    if (score.total < 70) rating = 'FAIR';
-    if (score.total < 50) rating = 'POOR';
-    if (score.total < 30) rating = 'CRITICAL';
+    let rating = 'N/A';
+    if (totalScore !== null) {
+      rating = 'EXCELLENT';
+      if (totalScore < 90) rating = 'GOOD';
+      if (totalScore < 70) rating = 'FAIR';
+      if (totalScore < 50) rating = 'POOR';
+      if (totalScore < 30) rating = 'CRITICAL';
+    }
 
-    // Group findings by severity
-    const findings = message.findings || [];
+    // Group findings by severity for logging
     const bySeverity = findings.reduce((acc, f) => {
       const sev = f.severity || 'UNKNOWN';
       acc[sev] = (acc[sev] || 0) + 1;
@@ -760,11 +764,12 @@ export class MessageRouter {
       .map(([sev, count]) => `${count} ${sev}`)
       .join(', ') || 'none';
 
-    console.log(`[Analysis] ${domain} - Score: ${score.total}/100 (${rating})`);
+    const scoreDisplay = totalScore !== null ? `${totalScore}` : 'N/A';
+    console.log(`[Analysis] ${domain} - Score: ${scoreDisplay}/100 (${rating})`);
     console.log(`  Findings: ${findingsCount} (${severitySummary})`);
 
     // Log top findings (if any)
-    if (findings.length > 0) {
+    if (findingsCount > 0) {
       const topFindings = findings.slice(0, 3);
       topFindings.forEach(finding => {
         const icon = finding.severity === 'HIGH' || finding.severity === 'CRITICAL' ? '❌' : '⚠️';
@@ -778,8 +783,8 @@ export class MessageRouter {
     // Store the analysis results
     const analysisData = {
       url: message.url,
-      findings: message.findings || [],
-      score: message.score,
+      findings,
+      score: normalizedScore,
       timestamp: message.timestamp || new Date().toISOString(),
       analysisSuccessful: message.analysisSuccessful !== false
     };
@@ -795,6 +800,109 @@ export class MessageRouter {
     });
 
     return true; // Async response
+  }
+
+  /**
+   * Normalize analysis score payloads from content script
+   * Ensures downstream consumers receive consistent fields
+   * @param {Object|number} rawScore
+   * @param {Array} findings
+   * @returns {Object} Normalized score
+   */
+  normalizeAnalysisScore(rawScore, findings = []) {
+    const severityCounts = findings.reduce((acc, finding) => {
+      const sev = (finding.severity || '').toString().toUpperCase();
+      if (!sev) return acc;
+      acc[sev] = (acc[sev] || 0) + 1;
+      return acc;
+    }, {});
+
+    const defaultScore = {
+      total: 0,
+      overallScore: 0,
+      normalized: 0,
+      score: 0,
+      grade: 'N/A',
+      summary: 'No analysis data available.',
+      message: 'No analysis data available.',
+      riskLevel: 'unknown',
+      totalFindings: findings.length,
+      criticalIssues: severityCounts.CRITICAL || 0,
+      highIssues: severityCounts.HIGH || 0,
+      mediumIssues: severityCounts.MEDIUM || 0,
+      lowIssues: severityCounts.LOW || 0
+    };
+
+    let normalizedScore = { ...defaultScore };
+
+    if (typeof rawScore === 'number' && Number.isFinite(rawScore)) {
+      normalizedScore.total = rawScore;
+      normalizedScore.overallScore = rawScore;
+      normalizedScore.normalized = rawScore;
+      normalizedScore.score = rawScore;
+    } else if (rawScore && typeof rawScore === 'object') {
+      normalizedScore = {
+        ...defaultScore,
+        ...rawScore
+      };
+
+      const numericFields = ['total', 'overallScore', 'score', 'normalized', 'value'];
+      for (const field of numericFields) {
+        const value = rawScore[field];
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          normalizedScore.total = value;
+          if (!Number.isFinite(normalizedScore.overallScore)) {
+            normalizedScore.overallScore = value;
+          }
+          if (!Number.isFinite(normalizedScore.normalized)) {
+            normalizedScore.normalized = value;
+          }
+          break;
+        }
+      }
+    }
+
+    if (typeof normalizedScore.score !== 'number' || !Number.isFinite(normalizedScore.score)) {
+      normalizedScore.score = normalizedScore.total;
+    }
+
+    if (typeof normalizedScore.overallScore !== 'number' || !Number.isFinite(normalizedScore.overallScore)) {
+      normalizedScore.overallScore = normalizedScore.total;
+    }
+
+    if (typeof normalizedScore.normalized !== 'number' || !Number.isFinite(normalizedScore.normalized)) {
+      normalizedScore.normalized = normalizedScore.total;
+    }
+
+    normalizedScore.totalFindings = typeof normalizedScore.totalFindings === 'number'
+      ? normalizedScore.totalFindings
+      : findings.length;
+
+    normalizedScore.criticalIssues = typeof normalizedScore.criticalIssues === 'number'
+      ? normalizedScore.criticalIssues
+      : (severityCounts.CRITICAL || 0);
+
+    normalizedScore.highIssues = typeof normalizedScore.highIssues === 'number'
+      ? normalizedScore.highIssues
+      : (severityCounts.HIGH || 0);
+
+    normalizedScore.mediumIssues = typeof normalizedScore.mediumIssues === 'number'
+      ? normalizedScore.mediumIssues
+      : (severityCounts.MEDIUM || 0);
+
+    normalizedScore.lowIssues = typeof normalizedScore.lowIssues === 'number'
+      ? normalizedScore.lowIssues
+      : (severityCounts.LOW || 0);
+
+    if (!normalizedScore.summary && normalizedScore.message) {
+      normalizedScore.summary = normalizedScore.message;
+    }
+
+    if (!normalizedScore.message && normalizedScore.summary) {
+      normalizedScore.message = normalizedScore.summary;
+    }
+
+    return normalizedScore;
   }
 
   /**
