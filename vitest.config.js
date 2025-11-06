@@ -28,15 +28,24 @@ export default defineConfig({
         'popup.js',
         'evidence-collector.js'
       ],
-      // Coverage thresholds (adjusted for current test coverage)
-      // TODO: Increase as more tests are added
+      // Coverage thresholds (gradual increase to industry standards)
+      // Phase 1: Match current coverage, prevent regression
+      // Target (Week 8): 70% overall, 85% security modules
       thresholds: {
-        lines: 5,
-        functions: 5,
-        branches: 5,
-        statements: 5
+        lines: 10,
+        functions: 10,
+        branches: 10,
+        statements: 10,
+        // Per-file thresholds for tested modules
+        // These will increase as new tests are added (see ACTION_PLAN.md)
+        'modules/auth/**/*.js': {
+          lines: 70,
+          functions: 69,
+          branches: 64,
+          statements: 69
+        }
       },
-      // Per-file thresholds for tested modules
+      // Enable per-file coverage tracking
       perFile: true
     },
 

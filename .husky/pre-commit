@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🔍 Running pre-commit checks..."
+
+# Run lint-staged to check only staged files
+npx lint-staged
+
+# Check coverage delta (ensure coverage doesn't decrease)
+echo "📊 Checking test coverage..."
+npm run test:coverage -- --changed
+
+echo "✅ Pre-commit checks passed!"
