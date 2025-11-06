@@ -7,9 +7,7 @@
   "extends": [
     "eslint:recommended"
   ],
-  "plugins": [
-    "webextensions"
-  ],
+  "plugins": [],
   "parserOptions": {
     "ecmaVersion": 2022,
     "sourceType": "module"
@@ -27,10 +25,6 @@
     "no-console": "off",
     "no-debugger": "warn",
     "no-constant-condition": ["error", { "checkLoops": false }],
-
-    // Chrome Extension Best Practices
-    "webextensions/no-browser-action-set-icon-without-path": "error",
-    "webextensions/no-browser-action-set-popup-without-popup": "error",
 
     // Async/Await Best Practices
     "require-await": "warn",
