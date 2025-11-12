@@ -21,6 +21,21 @@ export class DebugModeManager {
 
     // FIX #2: Session-only enabled domains (in-memory only, not persisted)
     this.enabledDomains = new Set();
+
+    // P0 FIX #1: Size limits to prevent memory bloat (8.01 MB issue)
+    this.MAX_REQUESTS_PER_SESSION = 100;
+    this.MAX_CONSOLE_LOGS = 500;
+    this.MAX_REDIRECTS = 50;
+    this.MAX_COOKIES = 100;
+
+    // P0 FIX #2: Register global onDetach listener ONCE (prevent listener leak)
+    chrome.debugger.onDetach.addListener((debuggeeId, reason) => {
+      const tabId = debuggeeId.tabId;
+      if (this.activeDebuggees.has(tabId)) {
+        console.log(`[DebugMode] Debugger detached from tab ${tabId}: ${reason}`);
+        this.cleanup(tabId);
+      }
+    });
   }
 
   /**
@@ -118,13 +133,8 @@ export class DebugModeManager {
       chrome.debugger.onEvent.addListener(listener);
       this.consoleListeners.set(tabId, listener);
 
-      // Handle debugger detachment
-      chrome.debugger.onDetach.addListener((debuggeeId, reason) => {
-        if (debuggeeId.tabId === tabId) {
-          console.log(`[DebugMode] Debugger detached from tab ${tabId}: ${reason}`);
-          this.cleanup(tabId);
-        }
-      });
+      // P0 FIX #2: Removed duplicate onDetach listener
+      // (Now handled by global listener in constructor to prevent memory leak)
 
     } catch (error) {
       // Debugger attachment can fail if DevTools already open
@@ -182,6 +192,10 @@ export class DebugModeManager {
       column: message.column
     };
 
+    // P0 FIX #1: LRU eviction - keep only last N console logs
+    if (session.consoleLogs.length >= this.MAX_CONSOLE_LOGS) {
+      session.consoleLogs.shift(); // Remove oldest
+    }
     session.consoleLogs.push(logEntry);
 
     // Broadcast to debug window
@@ -199,6 +213,12 @@ export class DebugModeManager {
     if (!session) return;
 
     const request = params.request;
+
+    // P0 FIX #1: LRU eviction - keep only last N requests
+    if (session.requests.length >= this.MAX_REQUESTS_PER_SESSION) {
+      session.requests.shift(); // Remove oldest
+    }
+
     session.requests.push({
       requestId: params.requestId,
       timestamp: params.timestamp,
@@ -259,6 +279,11 @@ export class DebugModeManager {
         });
       }
     } else {
+      // P0 FIX #1: LRU eviction before adding new request
+      if (session.requests.length >= this.MAX_REQUESTS_PER_SESSION) {
+        session.requests.shift(); // Remove oldest
+      }
+
       session.requests.push({
         ...requestData,
         capturedAt: Date.now()
@@ -287,6 +312,10 @@ export class DebugModeManager {
       headers: redirectData.headers
     };
 
+    // P0 FIX #1: LRU eviction - keep only last N redirects
+    if (session.redirectChain.length >= this.MAX_REDIRECTS) {
+      session.redirectChain.shift(); // Remove oldest
+    }
     session.redirectChain.push(redirect);
 
     // Broadcast to debug window

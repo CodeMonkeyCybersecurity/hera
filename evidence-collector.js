@@ -435,6 +435,23 @@ class EvidenceCollector {
     }
 
     const MAX_ACTIVE_FLOWS = 25; // Reduced from 50 - active flows include full request data
+
+    // P1 FIX #6: Time-based cleanup - remove flows older than 30 minutes
+    const FLOW_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+    const now = Date.now();
+    let expiredFlows = 0;
+    for (const [key, flow] of this._activeFlows.entries()) {
+      if (flow.startTime && (now - flow.startTime > FLOW_TIMEOUT)) {
+        this._activeFlows.delete(key);
+        expiredFlows++;
+      }
+    }
+    if (expiredFlows > 0) {
+      console.log(`Hera: Cleaned ${expiredFlows} expired flows (>30min old)`);
+      cleaned = true;
+    }
+
+    // Size-based cleanup (keep only most recent)
     if (this._activeFlows.size > MAX_ACTIVE_FLOWS) {
       const beforeSize = this._activeFlows.size;
       const entries = Array.from(this._activeFlows.entries()).slice(-MAX_ACTIVE_FLOWS);

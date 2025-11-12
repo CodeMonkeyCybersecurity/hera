@@ -463,6 +463,12 @@ export class WebRequestListeners {
           } catch (err) {
             console.warn('Storage error (quota exceeded):', err.message);
           }
+
+          // P0 FIX #3: Cleanup authRequests after processing to prevent memory leak
+          // Keep entry for 1 minute to allow for late-arriving response body captures
+          setTimeout(() => {
+            this.authRequests.delete(details.requestId);
+          }, 60000); // 1 minute
         }
       },
       { urls: ["<all_urls>"] }

@@ -337,8 +337,8 @@ export class StorageManager {
         priority: 2
       });
 
-      // Listen for notification click
-      chrome.notifications.onButtonClicked.addListener(async (notifId, buttonIndex) => {
+      // P1 FIX #5: Create named handlers so we can remove them later
+      const buttonClickHandler = async (notifId, buttonIndex) => {
         if (notifId === 'hera-export-prompt') {
           if (buttonIndex === 0) {
             // Export Now clicked
@@ -346,16 +346,27 @@ export class StorageManager {
           }
           // Clear notification
           await chrome.notifications.clear(notifId);
+          // P1 FIX #5: Remove listeners after use to prevent memory leak
+          chrome.notifications.onButtonClicked.removeListener(buttonClickHandler);
+          chrome.notifications.onClicked.removeListener(clickHandler);
         }
-      });
+      };
 
-      // If user clicks notification body, open popup
-      chrome.notifications.onClicked.addListener(async (notifId) => {
+      const clickHandler = async (notifId) => {
         if (notifId === 'hera-export-prompt') {
           await this.exportAndClearData();
           await chrome.notifications.clear(notifId);
+          // P1 FIX #5: Remove listeners after use to prevent memory leak
+          chrome.notifications.onButtonClicked.removeListener(buttonClickHandler);
+          chrome.notifications.onClicked.removeListener(clickHandler);
         }
-      });
+      };
+
+      // Listen for notification click
+      chrome.notifications.onButtonClicked.addListener(buttonClickHandler);
+
+      // If user clicks notification body, open popup
+      chrome.notifications.onClicked.addListener(clickHandler);
 
     } catch (error) {
       console.error('Failed to trigger auto-export:', error);

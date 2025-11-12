@@ -356,8 +356,18 @@ export class SessionTracker {
       }
     }
 
-    if (cleaned > 0) {
-      console.log(`Hera: Cleaned up ${cleaned} old sessions`);
+    // P1 FIX #4: Clean up orphaned domainToSession entries
+    // (domains pointing to sessions that no longer exist)
+    let orphanedDomains = 0;
+    for (const [domain, sessionId] of this._domainToSession.entries()) {
+      if (!this._currentSessions.has(sessionId)) {
+        this._domainToSession.delete(domain);
+        orphanedDomains++;
+      }
+    }
+
+    if (cleaned > 0 || orphanedDomains > 0) {
+      console.log(`Hera: Cleaned up ${cleaned} old sessions, ${orphanedDomains} orphaned domain mappings`);
       await this._syncToStorage();
     }
   }

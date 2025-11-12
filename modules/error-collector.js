@@ -1,15 +1,131 @@
 // Error Collector Module
 // Collects all extension errors and warnings for easy export
 
+// Size limits to prevent storage bloat
+const MAX_ENTRY_BYTES = 50000; // 50 KB per entry
+const MAX_ARGS_PREVIEW = 5000; // 5 KB for args preview
+const DEDUPE_WINDOW_MS = 5000; // 5 seconds
+
 class ErrorCollector {
   constructor() {
     this.errors = [];
     this.warnings = [];
     this.infos = [];
-    this.maxEntries = 1000; // Prevent memory overflow
+    this.maxEntries = 100; // Reduced from 1000 to prevent storage bloat
+
+    // Dedupe cache for noisy repeats
+    this._lastSeen = new Map(); // key -> timestamp
+
+    // OFF by default; can be toggled by message or storage
+    this.captureDebugLogs = false;
+
+    // FIX: Debounce timer for persistence (prevent rate limit violations)
+    this._persistTimer = null;
+    this._PERSIST_DELAY = 1000; // 1 second
 
     // Intercept console errors
     this.setupErrorHandlers();
+  }
+
+  /**
+   * Generate dedupe key for an error/warning
+   */
+  _dedupeKey(obj) {
+    const type = obj?.type ?? 'UNKNOWN';
+    const msg = (obj?.message || '').slice(0, 160);
+    return `${type}|${msg}`;
+  }
+
+  /**
+   * Check if we should log this error (de-dupe check)
+   */
+  _shouldLog(obj) {
+    const key = this._dedupeKey(obj);
+    const last = this._lastSeen.get(key) || 0;
+    const now = Date.now();
+    if (now - last < DEDUPE_WINDOW_MS) return false; // suppress burst
+    this._lastSeen.set(key, now);
+    return true;
+  }
+
+  /**
+   * Safely stringify a value with size limit
+   */
+  _safeStringify(value, byteLimit) {
+    const seen = new WeakSet();
+    let bytes = 0;
+    const replacer = (_k, v) => {
+      if (typeof v === 'object' && v !== null) {
+        if (seen.has(v)) return '[Circular]';
+        seen.add(v);
+
+        // Skip huge types outright
+        if (v instanceof Blob) return `[Blob ${v.type || ''} ${v.size || '?'} bytes]`;
+        if (v instanceof ArrayBuffer) return `[ArrayBuffer ${v.byteLength} bytes]`;
+        if (ArrayBuffer.isView(v)) return `[TypedArray ${v.byteLength} bytes]`;
+      }
+
+      // FIX: Properly convert to string for size calculation
+      let str;
+      if (typeof v === 'string') {
+        str = v;
+      } else {
+        try {
+          str = JSON.stringify(v);
+        } catch {
+          str = String(v);
+        }
+      }
+
+      bytes += str.length; // rough count
+      if (bytes > byteLimit) return '[TRUNCATED]';
+
+      // Trim very long strings
+      if (typeof v === 'string' && v.length > 4000) {
+        return v.slice(0, 4000) + '… [truncated]';
+      }
+      return v; // Return original value - JSON.stringify handles conversion
+    };
+
+    try {
+      const s = JSON.stringify(value, replacer);
+      if (new Blob([s]).size > byteLimit) return '[TRUNCATED_OBJECT]';
+      return s;
+    } catch {
+      return '[UNSERIALIZABLE]';
+    }
+  }
+
+  /**
+   * Shrink entry to stay under size limits
+   */
+  _shrink(entry) {
+    const e = { ...entry };
+
+    // Limit args preview
+    if (Array.isArray(e.args)) {
+      e.argsPreview = this._safeStringify(e.args, MAX_ARGS_PREVIEW);
+      delete e.args; // don't persist full args
+    }
+
+    // Trim stack to first line + ~2KB tail
+    if (typeof e.stack === 'string' && e.stack.length > 2000) {
+      const first = e.stack.split('\n')[0];
+      e.stack = `${first}\n… [stack truncated]`;
+    }
+
+    // Final size check
+    const blob = new Blob([JSON.stringify(e)]);
+    if (blob.size > MAX_ENTRY_BYTES) {
+      // Keep only a minimal summary
+      return {
+        type: e.type,
+        message: (e.message || '').slice(0, 500),
+        timestamp: e.timestamp,
+        note: `Entry truncated to stay under ${Math.round(MAX_ENTRY_BYTES/1024)}KB.`,
+      };
+    }
+    return e;
   }
 
   /**
@@ -19,7 +135,7 @@ class ErrorCollector {
     // Capture unhandled errors
     if (typeof self !== 'undefined') {
       self.addEventListener('error', (event) => {
-        this.logError({
+        const entry = {
           type: 'UNHANDLED_ERROR',
           message: event.message || 'Unknown error',
           stack: event.error?.stack,
@@ -27,17 +143,25 @@ class ErrorCollector {
           lineno: event.lineno,
           colno: event.colno,
           timestamp: new Date().toISOString()
-        });
+        };
+        // FIX: Add de-dupe check to prevent error bursts
+        if (this._shouldLog(entry)) {
+          this.logError(entry);
+        }
       });
 
       // Capture unhandled promise rejections
       self.addEventListener('unhandledrejection', (event) => {
-        this.logError({
+        const entry = {
           type: 'UNHANDLED_REJECTION',
           message: event.reason?.message || String(event.reason),
           stack: event.reason?.stack,
           timestamp: new Date().toISOString()
-        });
+        };
+        // FIX: Add de-dupe check to prevent rejection bursts
+        if (this._shouldLog(entry)) {
+          this.logError(entry);
+        }
       });
     }
 
@@ -57,69 +181,98 @@ class ErrorCollector {
       // BUGFIX: Don't log storage quota errors to prevent infinite loop
       const message = args.map(a => String(a)).join(' ');
       if (!message.includes('Storage rate limit') && !message.includes('QUOTA_BYTES')) {
-        this.logError({
+        const entry = {
           type: 'CONSOLE_ERROR',
           message: message,
           args: args,
           stack: new Error().stack,
           timestamp: new Date().toISOString()
-        });
+        };
+        if (this._shouldLog(entry)) {
+          this.logError(entry);
+        }
       }
       originalError.apply(console, args);
     };
 
     console.warn = (...args) => {
-      this.logWarning({
+      const entry = {
         type: 'CONSOLE_WARN',
         message: args.map(a => String(a)).join(' '),
         args: args,
         timestamp: new Date().toISOString()
-      });
+      };
+      if (this._shouldLog(entry)) {
+        this.logWarning(entry);
+      }
       originalWarn.apply(console, args);
     };
 
     // Optionally capture logs for debugging
     if (this.captureDebugLogs) {
       console.log = (...args) => {
-        this.logInfo({
+        const entry = {
           type: 'CONSOLE_LOG',
           message: args.map(a => String(a)).join(' '),
           args: args,
           timestamp: new Date().toISOString()
-        });
+        };
+        if (this._shouldLog(entry)) {
+          this.logInfo(entry);
+        }
         originalLog.apply(console, args);
       };
     }
   }
 
   /**
+   * Schedule debounced persistence
+   */
+  _schedulePersist() {
+    // Clear existing timer
+    if (this._persistTimer) {
+      clearTimeout(this._persistTimer);
+    }
+
+    // Schedule new write (debounced)
+    this._persistTimer = setTimeout(() => {
+      this.persistErrors();
+      this._persistTimer = null;
+    }, this._PERSIST_DELAY);
+  }
+
+  /**
    * Log an error
    */
   logError(error) {
-    this.errors.push(error);
+    const safe = this._shrink(error);
+    this.errors.push(safe);
     if (this.errors.length > this.maxEntries) {
       this.errors.shift(); // Remove oldest
     }
 
-    // Store in chrome.storage for persistence
-    this.persistErrors();
+    // FIX: Debounce persistence to prevent storage rate limit violations
+    this._schedulePersist();
   }
 
   /**
    * Log a warning
    */
   logWarning(warning) {
-    this.warnings.push(warning);
+    const safe = this._shrink(warning);
+    this.warnings.push(safe);
     if (this.warnings.length > this.maxEntries) {
       this.warnings.shift();
     }
+    // Do NOT persist on every warning to reduce write pressure
   }
 
   /**
    * Log info
    */
   logInfo(info) {
-    this.infos.push(info);
+    const safe = this._shrink(info);
+    this.infos.push(safe);
     if (this.infos.length > this.maxEntries) {
       this.infos.shift();
     }
@@ -218,7 +371,19 @@ class ErrorCollector {
   }
 
   /**
-   * Persist errors to storage
+   * Persist errors to storage immediately (cancels debounce timer)
+   */
+  async persistErrorsNow() {
+    // Cancel pending debounced write
+    if (this._persistTimer) {
+      clearTimeout(this._persistTimer);
+      this._persistTimer = null;
+    }
+    await this.persistErrors();
+  }
+
+  /**
+   * Persist errors to storage (internal - called by debounce timer)
    */
   async persistErrors() {
     try {
