@@ -12,6 +12,7 @@ import { AuthEvidenceManager } from './modules/auth/auth-evidence-manager.js';
 import { HeraAuthIssueVisualizer } from './modules/auth/auth-issue-visualizer.js';
 import { OAuth2VerificationEngine, HSTSVerificationEngine } from './oauth2-verification-engine.js';
 import { OIDCValidator } from './modules/auth/oidc-validator.js';
+import { ConfidenceScorer } from './modules/auth/confidence-scorer.js';
 
 /**
  * Main coordinator class for authentication protocol detection and analysis
@@ -109,11 +110,17 @@ class HeraAuthProtocolDetector {
    * Enhance an issue with confidence levels and evidence
    */
   enhanceIssue(issue, request) {
+    // Use new ConfidenceScorer for comprehensive confidence assessment
+    const withConfidence = ConfidenceScorer.enhanceFinding(issue, request, null);
+
+    // Add additional evidence and recommendations from legacy system
     const enhanced = {
-      ...issue,
-      confidence: this.evidenceManager.calculateConfidence(issue, request),
+      ...withConfidence,
       evidence: this.evidenceManager.gatherEvidence(issue, request),
-      recommendation: this.getIssueRecommendation(issue.type)
+      // Prefer confidence scorer recommendation, fallback to legacy
+      recommendation: withConfidence.confidenceRecommendation ||
+                      withConfidence.recommendation ||
+                      this.getIssueRecommendation(issue.type)
     };
 
     return enhanced;

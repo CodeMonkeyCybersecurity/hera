@@ -1,6 +1,8 @@
 // Session Security Analyzer
 // Detects session fixation, hijacking, and CSRF vulnerabilities
 
+import { CSRFDetector } from './csrf-detector.js';
+
 class SessionSecurityAnalyzer {
   constructor() {
     // Track session IDs across requests
@@ -183,111 +185,40 @@ class SessionSecurityAnalyzer {
    * @returns {Object|null} CSRF issue if detected
    */
   detectCSRF(request, url) {
-    const { method, headers, body, cookies } = request;
+    // Use the new CSRFDetector which properly handles OAuth2 token endpoints
+    // This eliminates false positives on legitimate OAuth2 flows
+    const requestFormatted = {
+      method: request.method,
+      url: url,
+      headers: request.headers || request.requestHeaders || [],
+      body: request.body || request.requestBody || ''
+    };
 
-    // Only check state-changing requests
-    if (!['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
-      return null;
-    }
+    // CSRFDetector.analyzeCSRFProtection handles:
+    // - OAuth2 token endpoint exemption per RFC 6749
+    // - OAuth2 grant type validation
+    // - Standard CSRF token detection
+    // - Returns null if protected, issue object if vulnerable
+    const csrfIssue = CSRFDetector.analyzeCSRFProtection(requestFormatted);
 
-    // BUGFIX: Exempt OAuth2 token endpoints from CSRF checks
-    // OAuth2 token endpoints use PKCE (code_verifier) or client authentication, not CSRF tokens
-    // Reference: RFC 6749, RFC 7636 (PKCE)
-    if (this._isOAuth2TokenEndpoint(url, body)) {
-      return null; // OAuth2 token exchange protected by PKCE or client secret
-    }
-
-    const origin = new URL(url).origin;
-    let csrfTokenFound = false;
-    let sameSiteCookiePresent = false;
-    let customHeaderPresent = false;
-
-    // 1. Check for CSRF tokens in common locations
-    const csrfHeaders = ['x-csrf-token', 'x-xsrf-token', 'csrf-token'];
-    for (const header of csrfHeaders) {
-      if (headers[header] || headers[header.toUpperCase()]) {
-        csrfTokenFound = true;
-        this._trackCSRFToken(origin, headers[header]);
-        break;
-      }
-    }
-
-    // Check for CSRF token in body
-    if (body && typeof body === 'string') {
-      if (body.includes('csrf') || body.includes('xsrf') || body.includes('_token')) {
-        csrfTokenFound = true;
-      }
-    }
-
-    // Check for CSRF token in query parameters (common pattern: f.sid, sid, token, etc.)
-    try {
-      const urlObj = new URL(url);
-      const params = urlObj.searchParams;
-      // Common CSRF query parameter names
-      const csrfParamNames = ['f.sid', 'sid', '_reqid', 'reqid', 'rt', 'token', 'csrf', 'xsrf'];
-      for (const paramName of csrfParamNames) {
-        if (params.has(paramName)) {
-          const value = params.get(paramName);
-          // Check if it looks like a token (not just a number or short string)
-          if (value && (value.length > 8 || paramName.includes('sid'))) {
-            csrfTokenFound = true;
-            break;
+    // Track CSRF tokens if found (for statistics)
+    if (!csrfIssue && request.headers) {
+      const csrfHeaders = ['x-csrf-token', 'x-xsrf-token', 'csrf-token'];
+      for (const headerName of csrfHeaders) {
+        const headerValue = request.headers[headerName] || request.headers[headerName.toUpperCase()];
+        if (headerValue) {
+          try {
+            const origin = new URL(url).origin;
+            this._trackCSRFToken(origin, headerValue);
+          } catch (e) {
+            // Invalid URL, skip tracking
           }
-        }
-      }
-    } catch (e) {
-      // Invalid URL, skip query param check
-    }
-
-    // 2. Check for SameSite cookies
-    if (cookies) {
-      for (const cookie of Object.values(cookies)) {
-        if (cookie.SameSite && ['Strict', 'Lax'].includes(cookie.SameSite)) {
-          sameSiteCookiePresent = true;
           break;
         }
       }
     }
 
-    // 3. Check for custom headers (CORS preflight required)
-    if (headers['x-requested-with'] === 'XMLHttpRequest') {
-      customHeaderPresent = true;
-    }
-
-    // Determine if CSRF protection is adequate
-    const protectionMethods = [];
-    if (csrfTokenFound) protectionMethods.push('CSRF token');
-    if (sameSiteCookiePresent) protectionMethods.push('SameSite cookie');
-    if (customHeaderPresent) protectionMethods.push('Custom header');
-
-    if (protectionMethods.length === 0) {
-      return {
-        severity: 'HIGH',
-        type: 'MISSING_CSRF_PROTECTION',
-        message: `${method} request missing CSRF protection`,
-        recommendation: 'Implement CSRF tokens, SameSite cookies, or custom headers',
-        detail: 'Attackers can forge requests from malicious sites to perform unauthorized actions',
-        cwe: 'CWE-352',
-        evidence: {
-          method,
-          url
-        }
-      };
-    }
-
-    // Weak protection (only one method)
-    if (protectionMethods.length === 1 && protectionMethods[0] === 'Custom header') {
-      return {
-        severity: 'MEDIUM',
-        type: 'WEAK_CSRF_PROTECTION',
-        message: 'CSRF protection relies only on custom headers',
-        recommendation: 'Add CSRF tokens for defense in depth',
-        detail: 'Custom headers can be bypassed in some browser configurations',
-        protection: protectionMethods
-      };
-    }
-
-    return null; // CSRF protection appears adequate
+    return csrfIssue;
   }
 
   /**
@@ -600,7 +531,7 @@ class SessionSecurityAnalyzer {
 
   /**
    * Check if request is to an OAuth2 token endpoint
-   * These endpoints are protected by PKCE (code_verifier) or client authentication, not CSRF tokens
+   * @deprecated Use CSRFDetector.isOAuth2TokenEndpoint() instead (more comprehensive)
    * @param {string} url - Request URL
    * @param {string} body - Request body
    * @returns {boolean} True if OAuth2 token endpoint
