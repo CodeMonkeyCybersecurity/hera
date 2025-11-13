@@ -154,6 +154,12 @@ export class HeraDashboard {
     const scoreCard = this.createSimpleScoreCard(score);
     container.appendChild(scoreCard);
 
+    // PHASE 2 UI: Evidence quality dashboard
+    const evidenceQualitySection = this.createEvidenceQualitySection(sessions);
+    if (evidenceQualitySection) {
+      container.appendChild(evidenceQualitySection);
+    }
+
     // Recent requests WITH their findings (merged view)
     const requestsSection = await this.createMergedRequestsList(sessions);
     container.appendChild(requestsSection);
@@ -197,6 +203,190 @@ export class HeraDashboard {
   }
 
   /**
+   * PHASE 2 UI: Create evidence quality dashboard section
+   * Displays aggregate evidence quality metrics from all captured requests
+   */
+  createEvidenceQualitySection(sessions) {
+    if (!sessions || sessions.length === 0) {
+      return null;
+    }
+
+    // Extract evidence quality data from sessions
+    // Evidence quality is computed by evidence-collector.js and stored in session metadata
+    const evidenceQualities = [];
+    sessions.forEach(session => {
+      if (session.metadata?.evidenceQuality) {
+        evidenceQualities.push(session.metadata.evidenceQuality);
+      }
+    });
+
+    // If no evidence quality data yet, show placeholder
+    if (evidenceQualities.length === 0) {
+      // Don't show section if no data - keep UI clean
+      return null;
+    }
+
+    // Calculate aggregate metrics
+    const totalRequests = evidenceQualities.length;
+    const avgCompleteness = Math.round(
+      evidenceQualities.reduce((sum, eq) => sum + (eq.completeness || 0), 0) / totalRequests
+    );
+
+    const reliabilityCount = {
+      HIGH: 0,
+      MEDIUM: 0,
+      LOW: 0,
+      VERY_LOW: 0
+    };
+
+    evidenceQualities.forEach(eq => {
+      const rel = eq.reliability || 'VERY_LOW';
+      if (reliabilityCount[rel] !== undefined) {
+        reliabilityCount[rel]++;
+      }
+    });
+
+    // Determine overall reliability
+    let overallReliability = 'VERY_LOW';
+    if (avgCompleteness >= 90) {
+      overallReliability = 'HIGH';
+    } else if (avgCompleteness >= 70) {
+      overallReliability = 'MEDIUM';
+    } else if (avgCompleteness >= 50) {
+      overallReliability = 'LOW';
+    }
+
+    // Collect unique gaps across all requests
+    const allGaps = new Set();
+    evidenceQualities.forEach(eq => {
+      if (eq.gaps && Array.isArray(eq.gaps)) {
+        eq.gaps.forEach(gap => {
+          if (gap.component) {
+            allGaps.add(gap.component);
+          }
+        });
+      }
+    });
+
+    // Create section
+    const section = document.createElement('div');
+    section.className = 'evidence-quality-section';
+
+    // Header
+    const header = document.createElement('h3');
+    header.className = 'evidence-quality-header';
+    header.textContent = 'Evidence Quality';
+    section.appendChild(header);
+
+    // Main quality card
+    const qualityCard = document.createElement('div');
+    qualityCard.className = `evidence-quality-card reliability-${overallReliability.toLowerCase()}`;
+
+    // Completeness indicator
+    const completenessDiv = document.createElement('div');
+    completenessDiv.className = 'evidence-completeness';
+
+    const completenessLabel = document.createElement('div');
+    completenessLabel.className = 'completeness-label';
+    completenessLabel.textContent = 'Evidence Completeness';
+
+    const completenessValue = document.createElement('div');
+    completenessValue.className = 'completeness-value';
+    completenessValue.textContent = `${avgCompleteness}%`;
+
+    const completenessBar = document.createElement('div');
+    completenessBar.className = 'completeness-bar';
+    const completenessBarFill = document.createElement('div');
+    completenessBarFill.className = 'completeness-bar-fill';
+    completenessBarFill.style.width = `${avgCompleteness}%`;
+    completenessBar.appendChild(completenessBarFill);
+
+    completenessDiv.appendChild(completenessLabel);
+    completenessDiv.appendChild(completenessValue);
+    completenessDiv.appendChild(completenessBar);
+    qualityCard.appendChild(completenessDiv);
+
+    // Reliability badge
+    const reliabilityDiv = document.createElement('div');
+    reliabilityDiv.className = 'evidence-reliability';
+
+    const reliabilityBadge = document.createElement('span');
+    reliabilityBadge.className = `reliability-badge reliability-${overallReliability.toLowerCase()}`;
+    reliabilityBadge.textContent = `${overallReliability} Reliability`;
+
+    const reliabilityDesc = document.createElement('span');
+    reliabilityDesc.className = 'reliability-desc';
+
+    const reliabilityMessages = {
+      'HIGH': 'Excellent evidence quality',
+      'MEDIUM': 'Good evidence quality',
+      'LOW': 'Limited evidence quality',
+      'VERY_LOW': 'Poor evidence quality'
+    };
+    reliabilityDesc.textContent = reliabilityMessages[overallReliability] || '';
+
+    reliabilityDiv.appendChild(reliabilityBadge);
+    reliabilityDiv.appendChild(reliabilityDesc);
+    qualityCard.appendChild(reliabilityDiv);
+
+    // Distribution stats
+    const statsDiv = document.createElement('div');
+    statsDiv.className = 'evidence-stats';
+    statsDiv.innerHTML = `
+      <div class="evidence-stat">
+        <span class="stat-label">Total Requests:</span>
+        <span class="stat-value">${totalRequests}</span>
+      </div>
+      <div class="evidence-stat">
+        <span class="stat-label">High Quality:</span>
+        <span class="stat-value">${reliabilityCount.HIGH}</span>
+      </div>
+      <div class="evidence-stat">
+        <span class="stat-label">Medium Quality:</span>
+        <span class="stat-value">${reliabilityCount.MEDIUM}</span>
+      </div>
+      <div class="evidence-stat">
+        <span class="stat-label">Low Quality:</span>
+        <span class="stat-value">${reliabilityCount.LOW + reliabilityCount.VERY_LOW}</span>
+      </div>
+    `;
+    qualityCard.appendChild(statsDiv);
+
+    // Gaps warning (if any)
+    if (allGaps.size > 0) {
+      const gapsDiv = document.createElement('div');
+      gapsDiv.className = 'evidence-gaps';
+
+      const gapsHeader = document.createElement('div');
+      gapsHeader.className = 'gaps-header';
+      gapsHeader.textContent = '⚠️ Evidence Gaps Detected';
+      gapsDiv.appendChild(gapsHeader);
+
+      const gapsList = document.createElement('ul');
+      gapsList.className = 'gaps-list';
+
+      const gapMessages = {
+        'requestBody': 'Request body not captured (enable debugger mode)',
+        'responseBody': 'Response body not captured (enable debugger mode)',
+        'requestHeaders': 'Request headers incomplete',
+        'responseHeaders': 'Response headers incomplete'
+      };
+
+      allGaps.forEach(gapComponent => {
+        const gapItem = document.createElement('li');
+        gapItem.textContent = gapMessages[gapComponent] || `Missing: ${gapComponent}`;
+        gapsList.appendChild(gapItem);
+      });
+
+      gapsDiv.appendChild(gapsList);
+      qualityCard.appendChild(gapsDiv);
+    }
+
+    section.appendChild(qualityCard);
+    return section;
+  }
+
+  /**
    * Create simplified findings list - flat, no collapsing
    */
   createSimpleFindingsList(findings) {
@@ -223,17 +413,52 @@ export class HeraDashboard {
       const severity = (finding.severity || 'LOW').toUpperCase();
       item.className = `finding-item-simple severity-${severity.toLowerCase()}`;
 
+      // Severity badge
       const badge = document.createElement('span');
       badge.className = 'severity-badge';
       badge.textContent = severity;
 
+      // PHASE 1 UI: Confidence badge
+      const confidence = finding.confidence || null;
+      if (confidence) {
+        const confidenceBadge = document.createElement('span');
+        confidenceBadge.className = `confidence-badge confidence-${confidence.toLowerCase()}`;
+
+        const confidenceIcon = {
+          'HIGH': '✓',
+          'MEDIUM': '~',
+          'LOW': '?',
+          'SPECULATIVE': '※'
+        }[confidence] || '';
+
+        confidenceBadge.textContent = `${confidenceIcon} ${confidence}`;
+        confidenceBadge.title = `Confidence: ${confidence}${finding.confidenceScore ? ` (${finding.confidenceScore}/100)` : ''}`;
+
+        item.appendChild(badge);
+        item.appendChild(confidenceBadge);
+      } else {
+        item.appendChild(badge);
+      }
+
+      // Message
       const message = document.createElement('span');
       message.className = 'finding-message';
       message.textContent = finding.message || finding.type || 'Unknown issue';
       if (finding.cookie) message.textContent += ` (${finding.cookie})`;
 
-      item.appendChild(badge);
       item.appendChild(message);
+
+      // PHASE 1 UI: False positive warning
+      if (finding.falsePositiveLikelihood === 'HIGH' || finding.falsePositiveLikelihood === 'VERY_HIGH') {
+        const fpWarning = document.createElement('div');
+        fpWarning.className = 'fp-warning';
+        fpWarning.textContent = '⚠️ Potential false positive - verify before reporting';
+        if (finding.confidenceRecommendation) {
+          fpWarning.title = finding.confidenceRecommendation;
+        }
+        item.appendChild(fpWarning);
+      }
+
       list.appendChild(item);
     });
 
