@@ -9,9 +9,13 @@
  * - POST body capture with automatic redaction
  * - Token request evidence collection
  * - PKCE verification support
+ *
+ * P1-3 ENHANCEMENT:
+ * - Batch logging to reduce console spam
  */
 
 import { RequestBodyCapturer } from './modules/auth/request-body-capturer.js';
+import { BatchLogger } from './modules/utils/batch-logger.js';
 
 class EvidenceCollector {
   constructor() {
@@ -42,10 +46,16 @@ class EvidenceCollector {
     this.lastSyncTime = null;
     this.SYNC_INTERVAL_MS = 60000; // Auto-save every 60 seconds
     this.autoSaveTimer = null;
+
+    // P1-3: Initialize batch logger to reduce console spam
+    this.logger = new BatchLogger({
+      interval: 10000, // Flush logs every 10 seconds
+      immediate: ['error', 'warn'] // Log errors/warnings immediately
+    });
   }
 
   async initialize() {
-    if (this.initialized) return;
+    if (this.initialized) {return;}
 
     try {
       // P0 FIX: Initialize IndexedDB for persistent evidence storage
@@ -67,7 +77,7 @@ class EvidenceCollector {
           this._activeFlows = new Map(Object.entries(evidence.activeFlows));
         }
 
-        console.log(`[Evidence] Restored ${this._responseCache.size} responses, ${this._timeline.length} events from IndexedDB`);
+        this.logger.info('init', `Restored ${this._responseCache.size} responses, ${this._timeline.length} events from IndexedDB`);
       } else {
         // Fallback: Try chrome.storage.local (legacy)
         const data = await chrome.storage.local.get(['heraEvidence', 'heraEvidenceSchemaVersion']);
@@ -83,7 +93,7 @@ class EvidenceCollector {
           this._proofOfConcepts = legacyEvidence.proofOfConcepts || [];
           this._timeline = legacyEvidence.timeline || [];
 
-          console.log(`[Evidence] Migrated ${this._responseCache.size} responses from chrome.storage.local`);
+          this.logger.info('init', `Migrated ${this._responseCache.size} responses from chrome.storage.local`);
 
           // Migrate to IndexedDB and clean up old storage
           await this._saveToIndexedDB();
@@ -122,7 +132,7 @@ class EvidenceCollector {
 
         request.onsuccess = () => {
           this.db = request.result;
-          console.debug('[Evidence] IndexedDB initialized successfully');
+          this.logger.debug('init', 'IndexedDB initialized successfully');
           resolve();
         };
 
@@ -145,7 +155,7 @@ class EvidenceCollector {
    * P0 FIX: Load evidence from IndexedDB
    */
   async _loadFromIndexedDB() {
-    if (!this.db) return null;
+    if (!this.db) {return null;}
 
     try {
       return new Promise((resolve, reject) => {
@@ -241,7 +251,7 @@ class EvidenceCollector {
 
         request.onsuccess = () => {
           this.lastSyncTime = Date.now();
-          console.debug('[Evidence] Saved to IndexedDB successfully');
+          this.logger.debug('save', 'Saved to IndexedDB successfully');
           resolve();
         };
         request.onerror = () => {
@@ -283,7 +293,7 @@ class EvidenceCollector {
         await this._saveToIndexedDB();
         if (this.db) {
           const secondsAgo = Math.floor((Date.now() - this.lastSyncTime) / 1000);
-          console.debug(`[Evidence] Auto-saved (last sync: ${secondsAgo}s ago)`);
+          this.logger.debug('auto-save', `Auto-saved (last sync: ${secondsAgo}s ago)`);
         }
       } catch (error) {
         console.warn('[Evidence] Auto-save error:', error.message);
@@ -382,7 +392,7 @@ class EvidenceCollector {
         ? `✓ Saved ${secondsSinceLastSync}s ago`
         : '⏳ Syncing...';
 
-      console.log(`[Evidence] ${this._responseCache.size} responses, ${this._timeline.length} events (${evidenceMB} MB) - ${syncStatus}`);
+      this.logger.info('status', `${this._responseCache.size} responses, ${this._timeline.length} events (${evidenceMB} MB) - ${syncStatus}`);
 
     } catch (error) {
       if (error.message?.includes('QUOTA')) {
@@ -477,7 +487,7 @@ class EvidenceCollector {
   _debouncedSync() {
     // P0 FIX: Save to IndexedDB (persistent, no quota limits)
     // Debounced to avoid excessive writes on high-traffic sites
-    if (this._syncTimeout) clearTimeout(this._syncTimeout);
+    if (this._syncTimeout) {clearTimeout(this._syncTimeout);}
     this._syncTimeout = setTimeout(async () => {
       try {
         await this._saveToIndexedDB();
@@ -536,7 +546,7 @@ class EvidenceCollector {
       const originalSize = truncated.body.length;
       truncated.body = truncated.body.substring(0, this.MAX_BODY_SIZE) +
         `\n\n[TRUNCATED - original size: ${originalSize} bytes]`;
-      console.debug(`[Evidence] Truncated response body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
+      this.logger.debug('truncate', `Response body truncated: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
     }
 
     // Step 2: Truncate request body if present
@@ -544,7 +554,7 @@ class EvidenceCollector {
       const originalSize = truncated.requestData.requestBody.length;
       truncated.requestData.requestBody = truncated.requestData.requestBody.substring(0, this.MAX_BODY_SIZE) +
         `\n\n[TRUNCATED - original size: ${originalSize} bytes]`;
-      console.debug(`[Evidence] Truncated request body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
+      this.logger.debug('truncate', `Request body truncated: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
     }
 
     // Step 3: Check size again after truncation
@@ -575,7 +585,7 @@ class EvidenceCollector {
       const originalSize = responseBody.length;
       truncatedBody = responseBody.substring(0, this.MAX_BODY_SIZE) +
         `\n\n[TRUNCATED - original size: ${originalSize} bytes]`;
-      console.debug(`[Evidence] Pre-truncated response body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
+      this.logger.debug('truncate', `Pre-truncated response body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
     }
 
     // Truncate request body if present
@@ -587,7 +597,7 @@ class EvidenceCollector {
         requestBody: requestData.requestBody.substring(0, this.MAX_BODY_SIZE) +
           `\n\n[TRUNCATED - original size: ${originalSize} bytes]`
       };
-      console.debug(`[Evidence] Pre-truncated request body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
+      this.logger.debug('truncate', `Pre-truncated request body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
     }
 
     let evidence = {
@@ -751,7 +761,7 @@ class EvidenceCollector {
       // CRITICAL FIX: Update the correct Map
       requestsMap.set(requestId, existingEvidence);
 
-      console.debug(`[Evidence] Found ${findings.length} security findings in response body for ${url}`);
+      this.logger.debug('findings', `Found ${findings.length} security findings in response body`, { url, count: findings.length });
     }
   }
 
@@ -820,7 +830,7 @@ class EvidenceCollector {
    * @returns {Object} HSTS analysis with preload check
    */
   checkHSTSHeader(headers, url = null) {
-    if (!headers) return { present: false, reason: 'no_headers' };
+    if (!headers) {return { present: false, reason: 'no_headers' };}
 
     // CRITICAL: HSTS is meaningless on HTTP connections
     let isHTTPS = true;
@@ -904,7 +914,7 @@ class EvidenceCollector {
    * @returns {Object} Security headers analysis
    */
   analyzeSecurityHeaders(headers) {
-    if (!headers) return { count: 0, headers: [], missing: [] };
+    if (!headers) {return { count: 0, headers: [], missing: [] };}
 
     const securityHeaders = {
       'strict-transport-security': null,
@@ -948,7 +958,7 @@ class EvidenceCollector {
    * @returns {Object} Cookie security analysis
    */
   analyzeCookies(headers) {
-    if (!headers) return { cookies: [], vulnerabilities: [] };
+    if (!headers) {return { cookies: [], vulnerabilities: [] };}
 
     const setCookieHeaders = headers.filter(h =>
       h.name.toLowerCase() === 'set-cookie'
@@ -1047,13 +1057,13 @@ class EvidenceCollector {
    * @returns {Object} Content type analysis
    */
   extractContentType(headers) {
-    if (!headers) return null;
+    if (!headers) {return null;}
 
     const contentTypeHeader = headers.find(h =>
       h.name.toLowerCase() === 'content-type'
     );
 
-    if (!contentTypeHeader) return null;
+    if (!contentTypeHeader) {return null;}
 
     const value = contentTypeHeader.value;
     const [mediaType, ...params] = value.split(';').map(p => p.trim());
@@ -1072,13 +1082,13 @@ class EvidenceCollector {
    * @returns {Object} Cache control analysis
    */
   extractCacheControl(headers) {
-    if (!headers) return null;
+    if (!headers) {return null;}
 
     const cacheControlHeader = headers.find(h =>
       h.name.toLowerCase() === 'cache-control'
     );
 
-    if (!cacheControlHeader) return null;
+    if (!cacheControlHeader) {return null;}
 
     const directives = cacheControlHeader.value.split(',').map(d => d.trim());
 
@@ -1149,7 +1159,7 @@ class EvidenceCollector {
    * @returns {Object} Flow correlation data
    */
   correlateWithFlow(requestId, requestData) {
-    if (!requestData) return null;
+    if (!requestData) {return null;}
 
     // Try to identify which flow this request belongs to
     const url = new URL(requestData.url);
@@ -1189,7 +1199,7 @@ class EvidenceCollector {
    */
   calculateSecurityHeaderScore(found, missing) {
     const totalHeaders = found.length + missing.length;
-    if (totalHeaders === 0) return 0;
+    if (totalHeaders === 0) {return 0;}
 
     return Math.round((found.length / totalHeaders) * 100);
   }
@@ -1247,10 +1257,10 @@ class EvidenceCollector {
     // Return sanitized samples for evidence
     const samples = [];
     if (body && typeof body === 'string') {
-      if (body.includes('password')) samples.push('Contains password field');
-      if (body.includes('api_key') || body.includes('apikey')) samples.push('Contains API key');
-      if (body.includes('secret')) samples.push('Contains secret');
-      if (body.includes('token')) samples.push('Contains token');
+      if (body.includes('password')) {samples.push('Contains password field');}
+      if (body.includes('api_key') || body.includes('apikey')) {samples.push('Contains API key');}
+      if (body.includes('secret')) {samples.push('Contains secret');}
+      if (body.includes('token')) {samples.push('Contains token');}
     }
     return samples;
   }
@@ -1265,10 +1275,10 @@ class EvidenceCollector {
 
   detectAuthProtocol(requestData) {
     const url = requestData.url.toLowerCase();
-    if (url.includes('oauth') || url.includes('authorize')) return 'OAuth2';
-    if (url.includes('saml')) return 'SAML';
-    if (url.includes('openid')) return 'OpenID';
-    if (url.includes('auth') || url.includes('login')) return 'Custom';
+    if (url.includes('oauth') || url.includes('authorize')) {return 'OAuth2';}
+    if (url.includes('saml')) {return 'SAML';}
+    if (url.includes('openid')) {return 'OpenID';}
+    if (url.includes('auth') || url.includes('login')) {return 'Custom';}
     return 'Unknown';
   }
 
@@ -1310,7 +1320,7 @@ class EvidenceCollector {
       h.name.toLowerCase() === 'origin'
     )?.value;
 
-    if (!origin) return { isCrossOrigin: false };
+    if (!origin) {return { isCrossOrigin: false };}
 
     const requestUrl = new URL(requestDetails.url);
     const originUrl = new URL(origin);
@@ -1353,10 +1363,10 @@ class EvidenceCollector {
 
   identifyAuthStep(requestDetails) {
     const url = requestDetails.url.toLowerCase();
-    if (url.includes('authorize')) return 'authorization_request';
-    if (url.includes('token')) return 'token_request';
-    if (url.includes('login')) return 'login_form';
-    if (url.includes('callback')) return 'callback';
+    if (url.includes('authorize')) {return 'authorization_request';}
+    if (url.includes('token')) {return 'token_request';}
+    if (url.includes('login')) {return 'login_form';}
+    if (url.includes('callback')) {return 'callback';}
     return 'unknown';
   }
 
@@ -1401,7 +1411,7 @@ class EvidenceCollector {
    */
   calculateEvidenceQuality(requestId) {
     const evidence = this.responseCache.get(requestId);
-    if (!evidence) return null;
+    if (!evidence) {return null;}
 
     const quality = {
       completeness: 0,
