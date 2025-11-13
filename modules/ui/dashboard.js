@@ -4,6 +4,7 @@
  */
 
 import { DOMSecurity } from './dom-security.js';
+import { RFC9700ComplianceChecker } from '../auth/rfc9700-compliance-checker.js';
 
 export class HeraDashboard {
   constructor() {
@@ -143,7 +144,7 @@ export class HeraDashboard {
       return;
     }
 
-    const { url, findings = [], score, timestamp, sessions = [] } = analysis;
+    const { findings = [], score, sessions = [] } = analysis;
 
     DOMSecurity.replaceChildren(this.dashboardContent);
 
@@ -158,6 +159,12 @@ export class HeraDashboard {
     const evidenceQualitySection = this.createEvidenceQualitySection(sessions);
     if (evidenceQualitySection) {
       container.appendChild(evidenceQualitySection);
+    }
+
+    // P1-5: RFC 9700 compliance dashboard
+    const rfc9700ComplianceSection = this.createRFC9700ComplianceSection(findings, sessions);
+    if (rfc9700ComplianceSection) {
+      container.appendChild(rfc9700ComplianceSection);
     }
 
     // Recent requests WITH their findings (merged view)
@@ -387,6 +394,159 @@ export class HeraDashboard {
   }
 
   /**
+   * P1-5: Create RFC 9700 compliance dashboard section
+   * Displays OAuth 2.1 security compliance status
+   */
+  createRFC9700ComplianceSection(findings, sessions) {
+    if (!findings || findings.length === 0) {
+      return null;
+    }
+
+    // Extract evidence from sessions for compliance checking
+    const evidence = {};
+    if (sessions && sessions.length > 0) {
+      const session = sessions[0];
+      if (session.metadata) {
+        evidence.domain = session.domain || 'unknown';
+        evidence.authorizationRequest = session.metadata.authorizationRequest;
+        evidence.tokenRequest = session.metadata.tokenRequest;
+        evidence.tokenResponse = session.metadata.tokenResponse;
+      }
+    }
+
+    // Run RFC 9700 compliance check
+    const checker = new RFC9700ComplianceChecker();
+    const compliance = checker.checkCompliance(findings, evidence);
+
+    // Create section
+    const section = document.createElement('div');
+    section.className = 'rfc9700-compliance-section';
+
+    // Header
+    const header = document.createElement('h3');
+    header.className = 'rfc9700-compliance-header';
+    header.textContent = 'RFC 9700 (OAuth 2.1) Compliance';
+    section.appendChild(header);
+
+    // Main compliance card
+    const complianceCard = document.createElement('div');
+    complianceCard.className = `rfc9700-compliance-card grade-${compliance.grade.toLowerCase().replace(/[^a-z]/g, '')}`;
+
+    // Compliance grade and score
+    const gradeDiv = document.createElement('div');
+    gradeDiv.className = 'compliance-grade';
+
+    const gradeLetter = document.createElement('div');
+    gradeLetter.className = 'compliance-grade-letter';
+    gradeLetter.textContent = compliance.grade;
+
+    const gradeScore = document.createElement('div');
+    gradeScore.className = 'compliance-grade-score';
+    gradeScore.textContent = `${compliance.score}/${compliance.maxScore} (${compliance.percentage}%)`;
+
+    gradeDiv.appendChild(gradeLetter);
+    gradeDiv.appendChild(gradeScore);
+    complianceCard.appendChild(gradeDiv);
+
+    // Violation counts
+    const violationsDiv = document.createElement('div');
+    violationsDiv.className = 'compliance-violations';
+
+    const mustViolations = compliance.violations.filter(v => v.severity === 'MUST' || v.severity === 'MUST NOT').length;
+    const shouldViolations = compliance.violations.filter(v => v.severity === 'SHOULD').length;
+    const mayViolations = compliance.violations.filter(v => v.severity === 'MAY').length;
+
+    violationsDiv.innerHTML = `
+      <div class="violation-stat">
+        <span class="stat-label">MUST Violations:</span>
+        <span class="stat-value critical">${mustViolations}</span>
+      </div>
+      <div class="violation-stat">
+        <span class="stat-label">SHOULD Violations:</span>
+        <span class="stat-value high">${shouldViolations}</span>
+      </div>
+      <div class="violation-stat">
+        <span class="stat-label">MAY/Best Practices:</span>
+        <span class="stat-value medium">${mayViolations}</span>
+      </div>
+    `;
+    complianceCard.appendChild(violationsDiv);
+
+    // Compensating controls (if any)
+    if (compliance.compensatingControls && compliance.compensatingControls.length > 0) {
+      const controlsDiv = document.createElement('div');
+      controlsDiv.className = 'compliance-compensating-controls';
+
+      const controlsHeader = document.createElement('div');
+      controlsHeader.className = 'controls-header';
+      controlsHeader.textContent = '✓ Compensating Controls';
+      controlsDiv.appendChild(controlsHeader);
+
+      const controlsList = document.createElement('ul');
+      controlsList.className = 'controls-list';
+
+      compliance.compensatingControls.forEach(control => {
+        const controlItem = document.createElement('li');
+        controlItem.textContent = `${control.requirement}: ${control.control} (${Math.round(control.credit * 100)}% credit)`;
+        controlsList.appendChild(controlItem);
+      });
+
+      controlsDiv.appendChild(controlsList);
+      complianceCard.appendChild(controlsDiv);
+    }
+
+    // Recommendations (if any)
+    if (compliance.recommendations && compliance.recommendations.length > 0) {
+      const recsDiv = document.createElement('div');
+      recsDiv.className = 'compliance-recommendations';
+
+      const recsHeader = document.createElement('div');
+      recsHeader.className = 'recs-header';
+      recsHeader.textContent = '📋 Recommendations';
+      recsDiv.appendChild(recsHeader);
+
+      const recsList = document.createElement('ul');
+      recsList.className = 'recs-list';
+
+      // Show top 3 recommendations
+      compliance.recommendations.slice(0, 3).forEach(rec => {
+        const recItem = document.createElement('li');
+        recItem.className = `rec-item priority-${rec.priority.toLowerCase()}`;
+
+        const priorityBadge = document.createElement('span');
+        priorityBadge.className = `priority-badge priority-${rec.priority.toLowerCase()}`;
+        priorityBadge.textContent = rec.priority;
+
+        const recText = document.createElement('span');
+        recText.textContent = rec.action;
+
+        const recEffort = document.createElement('span');
+        recEffort.className = 'rec-effort';
+        recEffort.textContent = ` (${rec.effort})`;
+
+        recItem.appendChild(priorityBadge);
+        recItem.appendChild(recText);
+        recItem.appendChild(recEffort);
+        recsList.appendChild(recItem);
+      });
+
+      recsDiv.appendChild(recsList);
+
+      if (compliance.recommendations.length > 3) {
+        const moreRecs = document.createElement('div');
+        moreRecs.className = 'more-recs';
+        moreRecs.textContent = `+${compliance.recommendations.length - 3} more recommendations`;
+        recsDiv.appendChild(moreRecs);
+      }
+
+      complianceCard.appendChild(recsDiv);
+    }
+
+    section.appendChild(complianceCard);
+    return section;
+  }
+
+  /**
    * Create simplified findings list - flat, no collapsing
    */
   createSimpleFindingsList(findings) {
@@ -444,7 +604,7 @@ export class HeraDashboard {
       const message = document.createElement('span');
       message.className = 'finding-message';
       message.textContent = finding.message || finding.type || 'Unknown issue';
-      if (finding.cookie) message.textContent += ` (${finding.cookie})`;
+      if (finding.cookie) {message.textContent += ` (${finding.cookie})`;}
 
       item.appendChild(message);
 
@@ -469,7 +629,7 @@ export class HeraDashboard {
   /**
    * Create merged requests list - shows each request with its vulnerabilities and JSON
    */
-  async createMergedRequestsList(sessions) {
+  createMergedRequestsList(sessions) {
     const section = document.createElement('div');
     section.className = 'requests-merged';
 
@@ -608,12 +768,12 @@ export class HeraDashboard {
    * Get maximum severity from findings
    */
   getMaxSeverity(findings) {
-    if (!findings || findings.length === 0) return null;
+    if (!findings || findings.length === 0) {return null;}
     const severities = findings.map(f => (f.severity || 'LOW').toUpperCase());
-    if (severities.includes('CRITICAL')) return 'CRITICAL';
-    if (severities.includes('HIGH')) return 'HIGH';
-    if (severities.includes('MEDIUM')) return 'MEDIUM';
-    if (severities.includes('LOW')) return 'LOW';
+    if (severities.includes('CRITICAL')) {return 'CRITICAL';}
+    if (severities.includes('HIGH')) {return 'HIGH';}
+    if (severities.includes('MEDIUM')) {return 'MEDIUM';}
+    if (severities.includes('LOW')) {return 'LOW';}
     return 'LOW';
   }
 
@@ -960,10 +1120,10 @@ export class HeraDashboard {
    * Get score color
    */
   getScoreColor(score) {
-    if (score >= 90) return '#10b981'; // green
-    if (score >= 70) return '#3b82f6'; // blue
-    if (score >= 50) return '#f59e0b'; // yellow
-    if (score >= 30) return '#f97316'; // orange
+    if (score >= 90) {return '#10b981';} // green
+    if (score >= 70) {return '#3b82f6';} // blue
+    if (score >= 50) {return '#f59e0b';} // yellow
+    if (score >= 30) {return '#f97316';} // orange
     return '#ef4444'; // red
   }
 }
