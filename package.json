@@ -14,7 +14,14 @@
     "validate": "node scripts/validate-extension.js",
     "check": "npm run lint && npm run validate",
     "preload": "npm run check",
-    "test": "npm run check"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:all": "npm run check && npm run test:coverage",
+    "prepare": "husky"
   },
   "keywords": [
     "chrome-extension",
@@ -30,10 +37,23 @@
     "ae-cvss-calculator": "^1.0.0"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.7",
+    "@vitest/ui": "^4.0.7",
     "eslint": "^8.57.0",
-    "nodemon": "^3.0.2"
+    "happy-dom": "^20.0.10",
+    "husky": "^9.1.7",
+    "jsdom": "^27.1.0",
+    "lint-staged": "^16.2.6",
+    "nodemon": "^3.0.2",
+    "vitest": "^4.0.7"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "lint-staged": {
+    "*.js": [
+      "eslint --fix",
+      "vitest related --run"
+    ]
   }
 }

@@ -1,3 +1,7 @@
 /.DS_Store
 /DATA-PERSISTENCE-GUIDE.md
 /ICON_INSTRUCTIONS.md
+node_modules/
+coverage/
+html/
+.vitest/
