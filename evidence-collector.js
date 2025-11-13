@@ -1376,6 +1376,192 @@ class EvidenceCollector {
   }
 
   /**
+   * PHASE 2: Calculate evidence quality metrics for a request
+   * Helps users understand evidence completeness and reliability
+   *
+   * @param {string} requestId - Request identifier
+   * @returns {Object|null} Evidence quality assessment
+   */
+  calculateEvidenceQuality(requestId) {
+    const evidence = this.responseCache.get(requestId);
+    if (!evidence) return null;
+
+    const quality = {
+      completeness: 0,
+      reliability: 'UNKNOWN',
+      gaps: [],
+      strengths: []
+    };
+
+    // Check what evidence components we have
+    const has = {
+      requestHeaders: !!(evidence.requestData?.requestHeaders && evidence.requestData.requestHeaders.length > 0),
+      requestBody: !!(evidence.requestData?.requestBody),
+      responseHeaders: !!(evidence.headers && evidence.headers.length > 0),
+      responseBody: !!(evidence.body),
+      statusCode: !!(evidence.statusCode),
+      timing: !!(evidence.timestamp)
+    };
+
+    // Calculate completeness percentage (0-100%)
+    const components = Object.values(has);
+    quality.completeness = Math.round(
+      (components.filter(Boolean).length / components.length) * 100
+    );
+
+    // Identify gaps
+    const method = evidence.requestData?.method || 'UNKNOWN';
+    const url = evidence.requestData?.url || '';
+
+    if (!has.requestHeaders) {
+      quality.gaps.push({
+        component: 'requestHeaders',
+        impact: 'Cannot validate CSRF tokens or custom headers'
+      });
+    } else {
+      quality.strengths.push('Request headers captured');
+    }
+
+    if (!has.requestBody && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+      quality.gaps.push({
+        component: 'requestBody',
+        impact: 'Cannot verify OAuth2 grant types, CSRF tokens in body, or POST data'
+      });
+    } else if (has.requestBody) {
+      quality.strengths.push('Request body captured');
+    }
+
+    if (!has.responseHeaders) {
+      quality.gaps.push({
+        component: 'responseHeaders',
+        impact: 'Cannot verify HSTS, cookie flags, or security headers'
+      });
+    } else {
+      quality.strengths.push('Response headers captured');
+    }
+
+    if (!has.responseBody && url.includes('/token')) {
+      quality.gaps.push({
+        component: 'responseBody',
+        impact: 'Cannot verify DPoP token type or refresh token rotation'
+      });
+    } else if (has.responseBody) {
+      quality.strengths.push('Response body captured');
+    }
+
+    if (!has.statusCode) {
+      quality.gaps.push({
+        component: 'statusCode',
+        impact: 'Cannot determine success/failure of request'
+      });
+    }
+
+    // Check for truncation
+    if (evidence.truncated) {
+      quality.gaps.push({
+        component: 'truncation',
+        impact: `Evidence was truncated: ${evidence.truncationReason || 'Size exceeded limits'}`
+      });
+    }
+
+    if (evidence.body && typeof evidence.body === 'string' && evidence.body.includes('[TRUNCATED')) {
+      quality.gaps.push({
+        component: 'responseBodyTruncated',
+        impact: 'Response body was truncated - some analysis may be incomplete'
+      });
+    }
+
+    if (evidence.requestData?.requestBody && evidence.requestData.requestBody.includes('[TRUNCATED')) {
+      quality.gaps.push({
+        component: 'requestBodyTruncated',
+        impact: 'Request body was truncated - parameter validation may be incomplete'
+      });
+    }
+
+    // Determine reliability
+    if (quality.completeness >= 90) {
+      quality.reliability = 'HIGH';
+      quality.reliabilityReason = 'All critical evidence components present';
+    } else if (quality.completeness >= 70) {
+      quality.reliability = 'MEDIUM';
+      quality.reliabilityReason = 'Most evidence components present, some gaps exist';
+    } else if (quality.completeness >= 50) {
+      quality.reliability = 'LOW';
+      quality.reliabilityReason = 'Significant evidence gaps - findings may be inaccurate';
+    } else {
+      quality.reliability = 'VERY_LOW';
+      quality.reliabilityReason = 'Minimal evidence available - findings highly speculative';
+    }
+
+    // Add recommendations
+    if (quality.gaps.length > 0) {
+      quality.recommendation = 'Enable response body capture (debugger mode) for more complete evidence';
+    } else {
+      quality.recommendation = 'Evidence quality is excellent';
+    }
+
+    return quality;
+  }
+
+  /**
+   * PHASE 2: Get aggregate evidence quality for all requests
+   * @returns {Object} Aggregate quality metrics
+   */
+  getAggregateEvidenceQuality() {
+    const allQualities = [];
+    const byReliability = {
+      HIGH: 0,
+      MEDIUM: 0,
+      LOW: 0,
+      VERY_LOW: 0
+    };
+
+    for (const [requestId, _] of this.responseCache) {
+      const quality = this.calculateEvidenceQuality(requestId);
+      if (quality) {
+        allQualities.push(quality);
+        byReliability[quality.reliability]++;
+      }
+    }
+
+    if (allQualities.length === 0) {
+      return {
+        totalRequests: 0,
+        averageCompleteness: 0,
+        distribution: byReliability,
+        recommendation: 'No evidence captured yet'
+      };
+    }
+
+    const averageCompleteness = Math.round(
+      allQualities.reduce((sum, q) => sum + q.completeness, 0) / allQualities.length
+    );
+
+    return {
+      totalRequests: allQualities.length,
+      averageCompleteness,
+      distribution: byReliability,
+      recommendation: this._getAggregateRecommendation(averageCompleteness, byReliability)
+    };
+  }
+
+  /**
+   * Get recommendation based on aggregate quality
+   * @private
+   */
+  _getAggregateRecommendation(avgCompleteness, distribution) {
+    if (avgCompleteness >= 90) {
+      return 'Excellent evidence quality - findings are highly reliable';
+    } else if (avgCompleteness >= 70) {
+      return 'Good evidence quality - most findings should be accurate';
+    } else if (distribution.LOW + distribution.VERY_LOW > distribution.HIGH + distribution.MEDIUM) {
+      return 'Enable debugger mode for response body capture to improve evidence quality';
+    } else {
+      return 'Mixed evidence quality - review individual findings carefully';
+    }
+  }
+
+  /**
    * Clear old evidence to prevent memory leaks
    * @param {number} maxAge - Maximum age in milliseconds
    */
