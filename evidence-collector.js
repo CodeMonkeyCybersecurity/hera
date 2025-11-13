@@ -9,9 +9,19 @@
  * - POST body capture with automatic redaction
  * - Token request evidence collection
  * - PKCE verification support
+ *
+ * P1-3 ENHANCEMENT:
+ * - Batch logging to reduce console spam
+ *
+ * P1-2 ENHANCEMENT:
+ * - Evidence quality indicators with request coverage tracking
+ * - Finding confidence metrics integration
+ * - Actionable suggestions for evidence improvement
  */
 
 import { RequestBodyCapturer } from './modules/auth/request-body-capturer.js';
+import { BatchLogger } from './modules/utils/batch-logger.js';
+import { ConfidenceScorer } from './modules/auth/confidence-scorer.js';
 
 class EvidenceCollector {
   constructor() {
@@ -42,10 +52,16 @@ class EvidenceCollector {
     this.lastSyncTime = null;
     this.SYNC_INTERVAL_MS = 60000; // Auto-save every 60 seconds
     this.autoSaveTimer = null;
+
+    // P1-3: Initialize batch logger to reduce console spam
+    this.logger = new BatchLogger({
+      interval: 10000, // Flush logs every 10 seconds
+      immediate: ['error', 'warn'] // Log errors/warnings immediately
+    });
   }
 
   async initialize() {
-    if (this.initialized) return;
+    if (this.initialized) {return;}
 
     try {
       // P0 FIX: Initialize IndexedDB for persistent evidence storage
@@ -67,7 +83,7 @@ class EvidenceCollector {
           this._activeFlows = new Map(Object.entries(evidence.activeFlows));
         }
 
-        console.log(`[Evidence] Restored ${this._responseCache.size} responses, ${this._timeline.length} events from IndexedDB`);
+        this.logger.info('init', `Restored ${this._responseCache.size} responses, ${this._timeline.length} events from IndexedDB`);
       } else {
         // Fallback: Try chrome.storage.local (legacy)
         const data = await chrome.storage.local.get(['heraEvidence', 'heraEvidenceSchemaVersion']);
@@ -83,7 +99,7 @@ class EvidenceCollector {
           this._proofOfConcepts = legacyEvidence.proofOfConcepts || [];
           this._timeline = legacyEvidence.timeline || [];
 
-          console.log(`[Evidence] Migrated ${this._responseCache.size} responses from chrome.storage.local`);
+          this.logger.info('init', `Migrated ${this._responseCache.size} responses from chrome.storage.local`);
 
           // Migrate to IndexedDB and clean up old storage
           await this._saveToIndexedDB();
@@ -122,7 +138,7 @@ class EvidenceCollector {
 
         request.onsuccess = () => {
           this.db = request.result;
-          console.debug('[Evidence] IndexedDB initialized successfully');
+          this.logger.debug('init', 'IndexedDB initialized successfully');
           resolve();
         };
 
@@ -145,7 +161,7 @@ class EvidenceCollector {
    * P0 FIX: Load evidence from IndexedDB
    */
   async _loadFromIndexedDB() {
-    if (!this.db) return null;
+    if (!this.db) {return null;}
 
     try {
       return new Promise((resolve, reject) => {
@@ -241,7 +257,7 @@ class EvidenceCollector {
 
         request.onsuccess = () => {
           this.lastSyncTime = Date.now();
-          console.debug('[Evidence] Saved to IndexedDB successfully');
+          this.logger.debug('save', 'Saved to IndexedDB successfully');
           resolve();
         };
         request.onerror = () => {
@@ -283,7 +299,7 @@ class EvidenceCollector {
         await this._saveToIndexedDB();
         if (this.db) {
           const secondsAgo = Math.floor((Date.now() - this.lastSyncTime) / 1000);
-          console.debug(`[Evidence] Auto-saved (last sync: ${secondsAgo}s ago)`);
+          this.logger.debug('auto-save', `Auto-saved (last sync: ${secondsAgo}s ago)`);
         }
       } catch (error) {
         console.warn('[Evidence] Auto-save error:', error.message);
@@ -382,7 +398,7 @@ class EvidenceCollector {
         ? `✓ Saved ${secondsSinceLastSync}s ago`
         : '⏳ Syncing...';
 
-      console.log(`[Evidence] ${this._responseCache.size} responses, ${this._timeline.length} events (${evidenceMB} MB) - ${syncStatus}`);
+      this.logger.info('status', `${this._responseCache.size} responses, ${this._timeline.length} events (${evidenceMB} MB) - ${syncStatus}`);
 
     } catch (error) {
       if (error.message?.includes('QUOTA')) {
@@ -477,7 +493,7 @@ class EvidenceCollector {
   _debouncedSync() {
     // P0 FIX: Save to IndexedDB (persistent, no quota limits)
     // Debounced to avoid excessive writes on high-traffic sites
-    if (this._syncTimeout) clearTimeout(this._syncTimeout);
+    if (this._syncTimeout) {clearTimeout(this._syncTimeout);}
     this._syncTimeout = setTimeout(async () => {
       try {
         await this._saveToIndexedDB();
@@ -536,7 +552,7 @@ class EvidenceCollector {
       const originalSize = truncated.body.length;
       truncated.body = truncated.body.substring(0, this.MAX_BODY_SIZE) +
         `\n\n[TRUNCATED - original size: ${originalSize} bytes]`;
-      console.debug(`[Evidence] Truncated response body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
+      this.logger.debug('truncate', `Response body truncated: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
     }
 
     // Step 2: Truncate request body if present
@@ -544,7 +560,7 @@ class EvidenceCollector {
       const originalSize = truncated.requestData.requestBody.length;
       truncated.requestData.requestBody = truncated.requestData.requestBody.substring(0, this.MAX_BODY_SIZE) +
         `\n\n[TRUNCATED - original size: ${originalSize} bytes]`;
-      console.debug(`[Evidence] Truncated request body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
+      this.logger.debug('truncate', `Request body truncated: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
     }
 
     // Step 3: Check size again after truncation
@@ -575,7 +591,7 @@ class EvidenceCollector {
       const originalSize = responseBody.length;
       truncatedBody = responseBody.substring(0, this.MAX_BODY_SIZE) +
         `\n\n[TRUNCATED - original size: ${originalSize} bytes]`;
-      console.debug(`[Evidence] Pre-truncated response body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
+      this.logger.debug('truncate', `Pre-truncated response body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
     }
 
     // Truncate request body if present
@@ -587,7 +603,7 @@ class EvidenceCollector {
         requestBody: requestData.requestBody.substring(0, this.MAX_BODY_SIZE) +
           `\n\n[TRUNCATED - original size: ${originalSize} bytes]`
       };
-      console.debug(`[Evidence] Pre-truncated request body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
+      this.logger.debug('truncate', `Pre-truncated request body: ${originalSize} → ${this.MAX_BODY_SIZE} bytes`);
     }
 
     let evidence = {
@@ -751,7 +767,7 @@ class EvidenceCollector {
       // CRITICAL FIX: Update the correct Map
       requestsMap.set(requestId, existingEvidence);
 
-      console.debug(`[Evidence] Found ${findings.length} security findings in response body for ${url}`);
+      this.logger.debug('findings', `Found ${findings.length} security findings in response body`, { url, count: findings.length });
     }
   }
 
@@ -820,7 +836,7 @@ class EvidenceCollector {
    * @returns {Object} HSTS analysis with preload check
    */
   checkHSTSHeader(headers, url = null) {
-    if (!headers) return { present: false, reason: 'no_headers' };
+    if (!headers) {return { present: false, reason: 'no_headers' };}
 
     // CRITICAL: HSTS is meaningless on HTTP connections
     let isHTTPS = true;
@@ -904,7 +920,7 @@ class EvidenceCollector {
    * @returns {Object} Security headers analysis
    */
   analyzeSecurityHeaders(headers) {
-    if (!headers) return { count: 0, headers: [], missing: [] };
+    if (!headers) {return { count: 0, headers: [], missing: [] };}
 
     const securityHeaders = {
       'strict-transport-security': null,
@@ -948,7 +964,7 @@ class EvidenceCollector {
    * @returns {Object} Cookie security analysis
    */
   analyzeCookies(headers) {
-    if (!headers) return { cookies: [], vulnerabilities: [] };
+    if (!headers) {return { cookies: [], vulnerabilities: [] };}
 
     const setCookieHeaders = headers.filter(h =>
       h.name.toLowerCase() === 'set-cookie'
@@ -1047,13 +1063,13 @@ class EvidenceCollector {
    * @returns {Object} Content type analysis
    */
   extractContentType(headers) {
-    if (!headers) return null;
+    if (!headers) {return null;}
 
     const contentTypeHeader = headers.find(h =>
       h.name.toLowerCase() === 'content-type'
     );
 
-    if (!contentTypeHeader) return null;
+    if (!contentTypeHeader) {return null;}
 
     const value = contentTypeHeader.value;
     const [mediaType, ...params] = value.split(';').map(p => p.trim());
@@ -1072,13 +1088,13 @@ class EvidenceCollector {
    * @returns {Object} Cache control analysis
    */
   extractCacheControl(headers) {
-    if (!headers) return null;
+    if (!headers) {return null;}
 
     const cacheControlHeader = headers.find(h =>
       h.name.toLowerCase() === 'cache-control'
     );
 
-    if (!cacheControlHeader) return null;
+    if (!cacheControlHeader) {return null;}
 
     const directives = cacheControlHeader.value.split(',').map(d => d.trim());
 
@@ -1149,7 +1165,7 @@ class EvidenceCollector {
    * @returns {Object} Flow correlation data
    */
   correlateWithFlow(requestId, requestData) {
-    if (!requestData) return null;
+    if (!requestData) {return null;}
 
     // Try to identify which flow this request belongs to
     const url = new URL(requestData.url);
@@ -1189,7 +1205,7 @@ class EvidenceCollector {
    */
   calculateSecurityHeaderScore(found, missing) {
     const totalHeaders = found.length + missing.length;
-    if (totalHeaders === 0) return 0;
+    if (totalHeaders === 0) {return 0;}
 
     return Math.round((found.length / totalHeaders) * 100);
   }
@@ -1247,10 +1263,10 @@ class EvidenceCollector {
     // Return sanitized samples for evidence
     const samples = [];
     if (body && typeof body === 'string') {
-      if (body.includes('password')) samples.push('Contains password field');
-      if (body.includes('api_key') || body.includes('apikey')) samples.push('Contains API key');
-      if (body.includes('secret')) samples.push('Contains secret');
-      if (body.includes('token')) samples.push('Contains token');
+      if (body.includes('password')) {samples.push('Contains password field');}
+      if (body.includes('api_key') || body.includes('apikey')) {samples.push('Contains API key');}
+      if (body.includes('secret')) {samples.push('Contains secret');}
+      if (body.includes('token')) {samples.push('Contains token');}
     }
     return samples;
   }
@@ -1265,10 +1281,10 @@ class EvidenceCollector {
 
   detectAuthProtocol(requestData) {
     const url = requestData.url.toLowerCase();
-    if (url.includes('oauth') || url.includes('authorize')) return 'OAuth2';
-    if (url.includes('saml')) return 'SAML';
-    if (url.includes('openid')) return 'OpenID';
-    if (url.includes('auth') || url.includes('login')) return 'Custom';
+    if (url.includes('oauth') || url.includes('authorize')) {return 'OAuth2';}
+    if (url.includes('saml')) {return 'SAML';}
+    if (url.includes('openid')) {return 'OpenID';}
+    if (url.includes('auth') || url.includes('login')) {return 'Custom';}
     return 'Unknown';
   }
 
@@ -1282,10 +1298,32 @@ class EvidenceCollector {
   }
 
   analyzeOAuth2Flow(requestDetails) {
-    // This will be expanded in Phase 2
+    // P1-2: Enhanced to identify specific OAuth2 flow types for request coverage tracking
     const url = new URL(requestDetails.url);
+    const isOAuth2 = url.pathname.includes('oauth') || url.searchParams.has('client_id');
+
+    // Identify flow type
+    let flowType = 'unknown';
+
+    // Authorization request: /authorize endpoint with response_type
+    if (url.pathname.includes('/authorize') && url.searchParams.has('response_type')) {
+      flowType = 'authorization_request';
+    }
+    // Token exchange: /token endpoint with grant_type=authorization_code
+    else if (url.pathname.includes('/token') && requestDetails.method === 'POST') {
+      const body = requestDetails.requestBody || '';
+      if (body.includes('grant_type=authorization_code')) {
+        flowType = 'token_exchange';
+      } else if (body.includes('grant_type=refresh_token')) {
+        flowType = 'token_refresh';
+      } else if (body.includes('grant_type=')) {
+        flowType = 'token_request'; // Other grant types
+      }
+    }
+
     return {
-      isOAuth2: url.pathname.includes('oauth') || url.searchParams.has('client_id'),
+      isOAuth2,
+      flowType,
       clientId: url.searchParams.get('client_id'),
       state: url.searchParams.get('state'),
       scope: url.searchParams.get('scope'),
@@ -1310,7 +1348,7 @@ class EvidenceCollector {
       h.name.toLowerCase() === 'origin'
     )?.value;
 
-    if (!origin) return { isCrossOrigin: false };
+    if (!origin) {return { isCrossOrigin: false };}
 
     const requestUrl = new URL(requestDetails.url);
     const originUrl = new URL(origin);
@@ -1353,10 +1391,10 @@ class EvidenceCollector {
 
   identifyAuthStep(requestDetails) {
     const url = requestDetails.url.toLowerCase();
-    if (url.includes('authorize')) return 'authorization_request';
-    if (url.includes('token')) return 'token_request';
-    if (url.includes('login')) return 'login_form';
-    if (url.includes('callback')) return 'callback';
+    if (url.includes('authorize')) {return 'authorization_request';}
+    if (url.includes('token')) {return 'token_request';}
+    if (url.includes('login')) {return 'login_form';}
+    if (url.includes('callback')) {return 'callback';}
     return 'unknown';
   }
 
@@ -1393,21 +1431,25 @@ class EvidenceCollector {
   }
 
   /**
-   * PHASE 2: Calculate evidence quality metrics for a request
-   * Helps users understand evidence completeness and reliability
+   * P1-2: Calculate evidence quality metrics for a request
+   * Helps users understand evidence completeness, request coverage, and finding confidence
    *
    * @param {string} requestId - Request identifier
+   * @param {Array} findings - Optional findings array for confidence calculation
    * @returns {Object|null} Evidence quality assessment
    */
-  calculateEvidenceQuality(requestId) {
+  calculateEvidenceQuality(requestId, findings = []) {
     const evidence = this.responseCache.get(requestId);
-    if (!evidence) return null;
+    if (!evidence) {return null;}
 
     const quality = {
       completeness: 0,
       reliability: 'UNKNOWN',
       gaps: [],
-      strengths: []
+      strengths: [],
+      requestCoverage: null,
+      findingConfidence: null,
+      suggestions: []
     };
 
     // Check what evidence components we have
@@ -1510,6 +1552,17 @@ class EvidenceCollector {
       quality.reliabilityReason = 'Minimal evidence available - findings highly speculative';
     }
 
+    // P1-2: Calculate request coverage (OAuth2 flow types)
+    quality.requestCoverage = this._calculateRequestCoverage();
+
+    // P1-2: Calculate finding confidence metrics
+    if (findings && findings.length > 0) {
+      quality.findingConfidence = ConfidenceScorer.calculateAggregateConfidence(findings);
+    }
+
+    // P1-2: Generate actionable suggestions
+    quality.suggestions = this._generateSuggestions(quality, has, url);
+
     // Add recommendations
     if (quality.gaps.length > 0) {
       quality.recommendation = 'Enable response body capture (debugger mode) for more complete evidence';
@@ -1518,6 +1571,86 @@ class EvidenceCollector {
     }
 
     return quality;
+  }
+
+  /**
+   * P1-2: Calculate request coverage for OAuth2 flows
+   * Tracks which OAuth2 flow types have been captured
+   * @private
+   */
+  _calculateRequestCoverage() {
+    const coverage = {
+      hasAuthFlow: false,
+      hasTokenExchange: false,
+      hasTokenRefresh: false,
+      percentage: 0
+    };
+
+    // Check all captured requests for OAuth2 flow types
+    for (const [_, evidence] of this.responseCache) {
+      const flowType = evidence.requestData?.analysis?.oauth2Flow?.flowType;
+      if (flowType === 'authorization_request') {
+        coverage.hasAuthFlow = true;
+      } else if (flowType === 'token_exchange') {
+        coverage.hasTokenExchange = true;
+      } else if (flowType === 'token_refresh') {
+        coverage.hasTokenRefresh = true;
+      }
+    }
+
+    // Calculate percentage
+    const found = [coverage.hasAuthFlow, coverage.hasTokenExchange, coverage.hasTokenRefresh].filter(Boolean).length;
+    const total = 3;
+    coverage.percentage = Math.floor((found / total) * 100);
+
+    return coverage;
+  }
+
+  /**
+   * P1-2: Generate actionable suggestions based on evidence gaps
+   * @private
+   */
+  _generateSuggestions(quality, has, url) {
+    const suggestions = [];
+
+    // Request coverage suggestions
+    if (quality.requestCoverage) {
+      if (!quality.requestCoverage.hasAuthFlow) {
+        suggestions.push('Capture an OAuth2 authorization request (/authorize endpoint) for complete flow analysis');
+      }
+      if (!quality.requestCoverage.hasTokenExchange) {
+        suggestions.push('Capture an OAuth2 token exchange request (grant_type=authorization_code) to verify PKCE');
+      }
+      if (!quality.requestCoverage.hasTokenRefresh) {
+        suggestions.push('Capture a refresh token request (grant_type=refresh_token) to verify rotation');
+      }
+    }
+
+    // Evidence completeness suggestions
+    if (!has.requestBody && url.includes('/token')) {
+      suggestions.push('Enable request body capture to verify OAuth2 grant types and PKCE code_verifier');
+    }
+    if (!has.responseBody && url.includes('/token')) {
+      suggestions.push('Enable response body capture (debugger mode) to verify token types and DPoP');
+    }
+
+    // Truncation suggestions
+    if (quality.gaps.some(g => g.component.includes('Truncated'))) {
+      suggestions.push('Increase body size limits in evidence-collector.js to capture full request/response data');
+    }
+
+    // Finding confidence suggestions
+    if (quality.findingConfidence) {
+      const { averageScore, distribution } = quality.findingConfidence;
+      if (averageScore < 70) {
+        suggestions.push('Findings have medium-to-low confidence - enable debugger mode for more reliable detections');
+      }
+      if ((distribution.LOW || 0) + (distribution.SPECULATIVE || 0) > (distribution.HIGH || 0)) {
+        suggestions.push('Most findings require manual verification - capture more complete evidence for higher confidence');
+      }
+    }
+
+    return suggestions;
   }
 
   /**
@@ -1575,6 +1708,61 @@ class EvidenceCollector {
       return 'Enable debugger mode for response body capture to improve evidence quality';
     } else {
       return 'Mixed evidence quality - review individual findings carefully';
+    }
+  }
+
+  /**
+   * P1-2: Log evidence quality for a domain to console
+   * Outputs comprehensive quality metrics in user-friendly format
+   *
+   * @param {string} domain - Domain to display quality for
+   * @param {Array} findings - Optional findings array for confidence calculation
+   */
+  logEvidenceQuality(domain, findings = []) {
+    // Calculate aggregate quality for all requests
+    const aggregate = this.getAggregateEvidenceQuality();
+
+    // Get request coverage from first available request
+    const firstRequestId = this.responseCache.keys().next().value;
+    const quality = firstRequestId ? this.calculateEvidenceQuality(firstRequestId, findings) : null;
+
+    if (!quality) {
+      console.log('[Evidence Quality] No evidence available for', domain);
+      return;
+    }
+
+    // Calculate finding confidence if findings provided
+    let findingConfidence = null;
+    if (findings && findings.length > 0) {
+      findingConfidence = ConfidenceScorer.calculateAggregateConfidence(findings);
+    }
+
+    // Output quality metrics
+    console.log(`[Evidence Quality] ${domain}`);
+    console.log(`  Request Coverage:  ${quality.requestCoverage.percentage}%`);
+    console.log(`    - Authorization flow: ${quality.requestCoverage.hasAuthFlow ? '✓' : '✗'}`);
+    console.log(`    - Token exchange:     ${quality.requestCoverage.hasTokenExchange ? '✓' : '✗'}`);
+    console.log(`    - Token refresh:      ${quality.requestCoverage.hasTokenRefresh ? '✓' : '✗'}`);
+
+    console.log(`  Evidence Complete: ${aggregate.averageCompleteness}%`);
+    console.log(`    - Total requests: ${aggregate.totalRequests}`);
+    console.log(`    - High quality:   ${aggregate.distribution.HIGH}`);
+    console.log(`    - Medium quality: ${aggregate.distribution.MEDIUM}`);
+    console.log(`    - Low quality:    ${aggregate.distribution.LOW + aggregate.distribution.VERY_LOW}`);
+
+    if (findingConfidence) {
+      console.log(`  Finding Confidence: ${findingConfidence.averageScore}%`);
+      console.log(`    - HIGH confidence:   ${findingConfidence.distribution.HIGH || 0}`);
+      console.log(`    - MEDIUM confidence: ${findingConfidence.distribution.MEDIUM || 0}`);
+      console.log(`    - LOW confidence:    ${findingConfidence.distribution.LOW || 0}`);
+      console.log(`    - SPECULATIVE:       ${findingConfidence.distribution.SPECULATIVE || 0}`);
+    }
+
+    if (quality.suggestions && quality.suggestions.length > 0) {
+      console.log('  Suggestions:');
+      quality.suggestions.forEach(s => {
+        console.log(`    • ${s}`);
+      });
     }
   }
 
