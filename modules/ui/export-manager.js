@@ -1,11 +1,12 @@
 /**
  * Export Manager
  * Handles exporting auth requests in multiple formats (JSON, Burp, Nuclei, cURL)
+ * PHASE 2: Added triaged export formats (JSON/CSV/Markdown with priority sorting)
  */
 
 export class ExportManager {
   constructor() {
-    this.formats = ['json', 'burp', 'nuclei', 'curl'];
+    this.formats = ['json', 'burp', 'nuclei', 'curl', 'triaged-json', 'triaged-csv', 'triaged-markdown'];
   }
 
   /**
@@ -43,58 +44,105 @@ export class ExportManager {
           Choose the export format for your security testing workflow:
         </div>
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 30px;">
-          <button class="export-option" data-format="json" style="
-            padding: 20px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            background: white;
-            cursor: pointer;
-            text-align: left;
-            transition: all 0.2s;
-          ">
-            <strong style="display: block; margin-bottom: 5px;">JSON (Default)</strong>
-            <small style="color: #666;">Complete data for analysis</small>
-          </button>
+        <div style="margin-bottom: 15px;">
+          <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #999; text-transform: uppercase; letter-spacing: 0.5px;">Standard Export</h3>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+            <button class="export-option" data-format="json" style="
+              padding: 20px;
+              border: 2px solid #e0e0e0;
+              border-radius: 8px;
+              background: white;
+              cursor: pointer;
+              text-align: left;
+              transition: all 0.2s;
+            ">
+              <strong style="display: block; margin-bottom: 5px;">JSON (Default)</strong>
+              <small style="color: #666;">Complete data for analysis</small>
+            </button>
 
-          <button class="export-option" data-format="burp" style="
-            padding: 20px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            background: white;
-            cursor: pointer;
-            text-align: left;
-            transition: all 0.2s;
-          ">
-            <strong style="display: block; margin-bottom: 5px;">Burp Suite</strong>
-            <small style="color: #666;">Import-ready session file</small>
-          </button>
+            <button class="export-option" data-format="burp" style="
+              padding: 20px;
+              border: 2px solid #e0e0e0;
+              border-radius: 8px;
+              background: white;
+              cursor: pointer;
+              text-align: left;
+              transition: all 0.2s;
+            ">
+              <strong style="display: block; margin-bottom: 5px;">Burp Suite</strong>
+              <small style="color: #666;">Import-ready session file</small>
+            </button>
 
-          <button class="export-option" data-format="nuclei" style="
-            padding: 20px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            background: white;
-            cursor: pointer;
-            text-align: left;
-            transition: all 0.2s;
-          ">
-            <strong style="display: block; margin-bottom: 5px;">Nuclei Targets</strong>
-            <small style="color: #666;">Host list for vulnerability scanning</small>
-          </button>
+            <button class="export-option" data-format="nuclei" style="
+              padding: 20px;
+              border: 2px solid #e0e0e0;
+              border-radius: 8px;
+              background: white;
+              cursor: pointer;
+              text-align: left;
+              transition: all 0.2s;
+            ">
+              <strong style="display: block; margin-bottom: 5px;">Nuclei Targets</strong>
+              <small style="color: #666;">Host list for vulnerability scanning</small>
+            </button>
 
-          <button class="export-option" data-format="curl" style="
-            padding: 20px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            background: white;
-            cursor: pointer;
-            text-align: left;
-            transition: all 0.2s;
-          ">
-            <strong style="display: block; margin-bottom: 5px;">cURL Commands</strong>
-            <small style="color: #666;">Replay requests manually</small>
-          </button>
+            <button class="export-option" data-format="curl" style="
+              padding: 20px;
+              border: 2px solid #e0e0e0;
+              border-radius: 8px;
+              background: white;
+              cursor: pointer;
+              text-align: left;
+              transition: all 0.2s;
+            ">
+              <strong style="display: block; margin-bottom: 5px;">cURL Commands</strong>
+              <small style="color: #666;">Replay requests manually</small>
+            </button>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 30px;">
+          <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #4CAF50; text-transform: uppercase; letter-spacing: 0.5px;">🎯 Triaged Export (Phase 2)</h3>
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+            <button class="export-option" data-format="triaged-json" style="
+              padding: 20px;
+              border: 2px solid #4CAF50;
+              border-radius: 8px;
+              background: #f0fdf4;
+              cursor: pointer;
+              text-align: left;
+              transition: all 0.2s;
+            ">
+              <strong style="display: block; margin-bottom: 5px; color: #166534;">JSON Triaged</strong>
+              <small style="color: #15803d;">Priority-sorted findings</small>
+            </button>
+
+            <button class="export-option" data-format="triaged-csv" style="
+              padding: 20px;
+              border: 2px solid #4CAF50;
+              border-radius: 8px;
+              background: #f0fdf4;
+              cursor: pointer;
+              text-align: left;
+              transition: all 0.2s;
+            ">
+              <strong style="display: block; margin-bottom: 5px; color: #166534;">CSV Triaged</strong>
+              <small style="color: #15803d;">For Excel/Sheets</small>
+            </button>
+
+            <button class="export-option" data-format="triaged-markdown" style="
+              padding: 20px;
+              border: 2px solid #4CAF50;
+              border-radius: 8px;
+              background: #f0fdf4;
+              cursor: pointer;
+              text-align: left;
+              transition: all 0.2s;
+            ">
+              <strong style="display: block; margin-bottom: 5px; color: #166534;">Markdown Triaged</strong>
+              <small style="color: #15803d;">Human-readable report</small>
+            </button>
+          </div>
         </div>
 
         <div style="display: flex; gap: 10px; justify-content: flex-end;">
@@ -161,6 +209,15 @@ export class ExportManager {
         break;
       case 'curl':
         this.exportAsCurl(data, type, date, time);
+        break;
+      case 'triaged-json':
+        this.exportAsTriagedJSON(data, type, date, time);
+        break;
+      case 'triaged-csv':
+        this.exportAsTriagedCSV(data, type, date, time);
+        break;
+      case 'triaged-markdown':
+        this.exportAsTriagedMarkdown(data, type, date, time);
         break;
       default:
         this.exportAsJSON(data, type, date, time);
@@ -456,5 +513,137 @@ export class ExportManager {
       });
     }
     return allRequests;
+  }
+
+  /**
+   * PHASE 2: Export as triaged JSON
+   * Uses TriagedExporter to sort findings by severity + confidence
+   */
+  async exportAsTriagedJSON(data, type, date, time) {
+    try {
+      // Import TriagedExporter dynamically
+      const { TriagedExporter } = await import('../export/triaged-exporter.js');
+
+      // Extract findings from sessions
+      const allFindings = this.extractFindingsFromSessions(data);
+
+      if (allFindings.length === 0) {
+        alert('No findings to export. Try analyzing some authentication flows first.');
+        return;
+      }
+
+      // Create triaged export
+      const triagedData = TriagedExporter.exportWithTriage(allFindings, null);
+
+      // Export as JSON
+      const jsonString = TriagedExporter.toJSON(triagedData);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+
+      chrome.downloads.download({
+        url: url,
+        filename: `${date}_${time}_hera-triaged.json`,
+        saveAs: true
+      });
+    } catch (error) {
+      console.error('Triaged JSON export failed:', error);
+      alert('Failed to create triaged JSON export: ' + error.message);
+    }
+  }
+
+  /**
+   * PHASE 2: Export as triaged CSV
+   * CSV format for spreadsheet analysis
+   */
+  async exportAsTriagedCSV(data, type, date, time) {
+    try {
+      const { TriagedExporter } = await import('../export/triaged-exporter.js');
+
+      const allFindings = this.extractFindingsFromSessions(data);
+
+      if (allFindings.length === 0) {
+        alert('No findings to export. Try analyzing some authentication flows first.');
+        return;
+      }
+
+      // Create CSV export
+      const csvString = TriagedExporter.toCSV(allFindings);
+      const blob = new Blob([csvString], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+
+      chrome.downloads.download({
+        url: url,
+        filename: `${date}_${time}_hera-triaged.csv`,
+        saveAs: true
+      });
+    } catch (error) {
+      console.error('Triaged CSV export failed:', error);
+      alert('Failed to create triaged CSV export: ' + error.message);
+    }
+  }
+
+  /**
+   * PHASE 2: Export as triaged Markdown
+   * Human-readable report format
+   */
+  async exportAsTriagedMarkdown(data, type, date, time) {
+    try {
+      const { TriagedExporter } = await import('../export/triaged-exporter.js');
+
+      const allFindings = this.extractFindingsFromSessions(data);
+
+      if (allFindings.length === 0) {
+        alert('No findings to export. Try analyzing some authentication flows first.');
+        return;
+      }
+
+      // Create triaged export
+      const triagedData = TriagedExporter.exportWithTriage(allFindings, null);
+
+      // Export as Markdown
+      const markdownString = TriagedExporter.toMarkdown(triagedData);
+      const blob = new Blob([markdownString], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+
+      chrome.downloads.download({
+        url: url,
+        filename: `${date}_${time}_hera-triaged.md`,
+        saveAs: true
+      });
+    } catch (error) {
+      console.error('Triaged Markdown export failed:', error);
+      alert('Failed to create triaged Markdown export: ' + error.message);
+    }
+  }
+
+  /**
+   * PHASE 2: Extract all findings from sessions
+   * Aggregates security findings from all sessions
+   */
+  extractFindingsFromSessions(data) {
+    const allFindings = [];
+
+    if (!data || !Array.isArray(data)) {
+      return allFindings;
+    }
+
+    data.forEach(session => {
+      // Extract from metadata.securityFindings
+      if (session.metadata?.securityFindings) {
+        allFindings.push(...session.metadata.securityFindings);
+      }
+
+      // Extract from metadata.authAnalysis.issues
+      if (session.metadata?.authAnalysis?.issues) {
+        allFindings.push(...session.metadata.authAnalysis.issues);
+      }
+
+      // Extract from evidencePackage.evidence.cookieFlags.vulnerabilities
+      if (session.metadata?.evidencePackage?.evidence?.cookieFlags?.vulnerabilities) {
+        allFindings.push(...session.metadata.evidencePackage.evidence.cookieFlags.vulnerabilities);
+      }
+    });
+
+    return allFindings;
   }
 }

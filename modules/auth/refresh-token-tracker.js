@@ -122,28 +122,53 @@ export class RefreshTokenTracker {
       metadata.lastSeen = Date.now();
       this.tokenHashes.set(tokenHash, metadata);
 
-      // FINDING: Refresh token was reused (rotation violation)
-      return {
-        type: 'REFRESH_TOKEN_NOT_ROTATED',
-        severity: 'HIGH',
-        confidence: 'HIGH',
-        message: 'Refresh token was not rotated on use (RFC 9700 violation)',
-        evidence: {
-          domain,
-          tokenHash: tokenHash, // Safe to include (one-way hash)
-          firstSeen: new Date(metadata.firstSeen).toISOString(),
-          lastSeen: new Date(metadata.lastSeen).toISOString(),
-          useCount: metadata.useCount,
-          timeSinceFirstUse: Date.now() - metadata.firstSeen,
-          recommendation: 'Authorization servers SHOULD rotate refresh tokens on each use (RFC 9700 Section 4.13)'
-        },
-        references: [
-          'RFC 9700 Section 4.13: Refresh Token Rotation',
-          'OWASP ASVS 3.0.1: Verify that refresh tokens are rotated',
-          'CWE-613: Insufficient Session Expiration'
-        ],
-        cwe: 'CWE-613'
-      };
+      // Check for DPoP or other sender-constraint mechanisms (RFC 9700 Section 4.13.2)
+      const hasDPoP = this._hasDPoPProtection(tokenResponse);
+
+      if (!hasDPoP) {
+        // FINDING: Refresh token was reused WITHOUT sender-constraint (HIGH severity)
+        return {
+          type: 'REFRESH_TOKEN_NOT_ROTATED',
+          severity: 'HIGH',
+          confidence: 'HIGH',
+          message: 'Refresh token not rotated (RFC 9700 violation) and no sender-constraint detected',
+          evidence: {
+            domain,
+            tokenHash: tokenHash, // Safe to include (one-way hash)
+            firstSeen: new Date(metadata.firstSeen).toISOString(),
+            lastSeen: new Date(metadata.lastSeen).toISOString(),
+            useCount: metadata.useCount,
+            timeSinceFirstUse: Date.now() - metadata.firstSeen,
+            recommendation: 'Implement refresh token rotation OR use DPoP/mTLS for sender-constraint (RFC 9700 Section 4.13.2)'
+          },
+          references: [
+            'RFC 9700 Section 4.13.2: Refresh Token Protection and Rotation',
+            'RFC 9449: OAuth 2.0 Demonstrating Proof-of-Possession (DPoP)',
+            'OWASP ASVS 3.0.1: Verify that refresh tokens are rotated',
+            'CWE-613: Insufficient Session Expiration'
+          ],
+          cwe: 'CWE-613'
+        };
+      } else {
+        // FINDING: Refresh token not rotated BUT protected by DPoP (LOW severity)
+        return {
+          type: 'REFRESH_TOKEN_NOT_ROTATED_BUT_PROTECTED',
+          severity: 'LOW',
+          confidence: 'MEDIUM',
+          message: 'Refresh token not rotated but protected by DPoP (acceptable per RFC 9700 Section 4.13.2)',
+          evidence: {
+            domain,
+            protection: 'DPoP',
+            tokenType: tokenResponse.token_type,
+            useCount: metadata.useCount,
+            note: 'RFC 9700 allows non-rotation if sender-constrained tokens (DPoP/mTLS) are used'
+          },
+          references: [
+            'RFC 9700 Section 4.13.2: Refresh Token Protection',
+            'RFC 9449: OAuth 2.0 Demonstrating Proof-of-Possession (DPoP)'
+          ]
+        };
+      }
     }
 
     // NEW TOKEN: Record hash and metadata
@@ -156,6 +181,36 @@ export class RefreshTokenTracker {
 
     // No finding (token is new, rotation working correctly)
     return null;
+  }
+
+  /**
+   * Check if token response has DPoP protection
+   * DPoP (Demonstrating Proof-of-Possession) is a sender-constraint mechanism
+   *
+   * @param {Object} tokenResponse - Token response body (parsed)
+   * @returns {boolean} True if DPoP protection detected
+   * @private
+   */
+  _hasDPoPProtection(tokenResponse) {
+    if (!tokenResponse) return false;
+
+    // Check token_type field for DPoP
+    const tokenType = tokenResponse.token_type;
+    if (tokenType && (tokenType.toLowerCase() === 'dpop' || tokenType === 'DPoP')) {
+      return true;
+    }
+
+    // Check for DPoP confirmation field (draft-ietf-oauth-dpop)
+    if (tokenResponse.dpop_nonce || tokenResponse.token_binding) {
+      return true;
+    }
+
+    // Check for mTLS indicators (another sender-constraint method)
+    if (tokenResponse.cnf || tokenResponse['client-assertion-type']) {
+      return true;
+    }
+
+    return false;
   }
 
   /**

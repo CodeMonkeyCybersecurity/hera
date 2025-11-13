@@ -1006,3 +1006,234 @@ h1 {
 .debug-messages::-webkit-scrollbar-thumb:hover {
   background: #a1a1a1;
 }
+
+/* ========================================
+   PHASE 1 & 2 UI: Confidence Badges & Evidence Quality
+   ======================================== */
+
+/* Confidence Badge Styles */
+.confidence-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  margin-left: 6px;
+  border-radius: 3px;
+  font-size: 0.75em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid;
+}
+
+.confidence-badge.confidence-high {
+  background-color: #d4edda;
+  color: #155724;
+  border-color: #c3e6cb;
+}
+
+.confidence-badge.confidence-medium {
+  background-color: #fff3cd;
+  color: #856404;
+  border-color: #ffeaa7;
+}
+
+.confidence-badge.confidence-low {
+  background-color: #fff3cd;
+  color: #856404;
+  border-color: #ffeaa7;
+}
+
+.confidence-badge.confidence-speculative {
+  background-color: #e2e3e5;
+  color: #383d41;
+  border-color: #d6d8db;
+}
+
+/* False Positive Warning */
+.fp-warning {
+  display: block;
+  margin-top: 6px;
+  padding: 6px 10px;
+  background-color: #fff3cd;
+  border-left: 3px solid #ffc107;
+  font-size: 0.85em;
+  color: #856404;
+  border-radius: 3px;
+}
+
+.fp-warning:hover {
+  background-color: #ffe8a1;
+  cursor: help;
+}
+
+/* Evidence Quality Section */
+.evidence-quality-section {
+  margin: 15px 0;
+  padding: 12px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #dee2e6;
+}
+
+.evidence-quality-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.evidence-quality-title {
+  font-weight: 600;
+  font-size: 0.95em;
+  color: #495057;
+}
+
+.evidence-quality-score {
+  font-size: 1.2em;
+  font-weight: 700;
+}
+
+.evidence-quality-score.high {
+  color: #28a745;
+}
+
+.evidence-quality-score.medium {
+  color: #ffc107;
+}
+
+.evidence-quality-score.low {
+  color: #dc3545;
+}
+
+.evidence-quality-details {
+  font-size: 0.85em;
+  color: #6c757d;
+}
+
+.evidence-gap {
+  margin: 6px 0;
+  padding: 6px 10px;
+  background-color: #fff3cd;
+  border-left: 3px solid #ffc107;
+  font-size: 0.8em;
+  border-radius: 3px;
+}
+
+.evidence-strength {
+  margin: 4px 0;
+  padding: 4px 8px;
+  color: #155724;
+  font-size: 0.8em;
+}
+
+.evidence-strength::before {
+  content: '✓ ';
+  color: #28a745;
+  font-weight: bold;
+}
+
+/* Export Button Enhancement */
+.export-triaged-btn {
+  margin-left: 8px;
+  padding: 6px 12px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.export-triaged-btn:hover {
+  background-color: #0056b3;
+}
+
+.export-triaged-btn:active {
+  background-color: #004085;
+}
+
+/* Triage Priority Badge */
+.priority-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  margin-right: 6px;
+  border-radius: 3px;
+  font-size: 0.75em;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.priority-badge.critical {
+  background-color: #dc3545;
+  color: white;
+}
+
+.priority-badge.high-priority {
+  background-color: #fd7e14;
+  color: white;
+}
+
+.priority-badge.medium-priority {
+  background-color: #ffc107;
+  color: #212529;
+}
+
+.priority-badge.low-priority {
+  background-color: #6c757d;
+  color: white;
+}
+
+.priority-badge.needs-review {
+  background-color: #17a2b8;
+  color: white;
+}
+
+/* Enhanced Finding Item for Triage */
+.finding-item-simple {
+  position: relative;
+  flex-wrap: wrap;
+}
+
+.finding-item-simple .confidence-badge {
+  flex-shrink: 0;
+}
+
+.finding-item-simple .fp-warning {
+  flex-basis: 100%;
+}
+
+/* Tooltip Enhancement */
+.confidence-badge[title]:hover::after {
+  content: attr(title);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  background-color: #333;
+  color: white;
+  font-size: 0.75em;
+  white-space: nowrap;
+  border-radius: 4px;
+  z-index: 1000;
+  pointer-events: none;
+  margin-bottom: 5px;
+}
+
+/* Export Format Selector */
+.export-format-selector {
+  margin: 15px 0;
+  padding: 10px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+}
+
+.export-format-selector label {
+  display: block;
+  margin: 8px 0;
+  font-size: 0.9em;
+}
+
+.export-format-selector input[type="radio"] {
+  margin-right: 6px;
+}
