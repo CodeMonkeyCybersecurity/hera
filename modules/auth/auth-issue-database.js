@@ -420,27 +420,42 @@ class AuthIssueDatabase {
           pattern: /md5|sha1|base64.*password/i,
           issue: "Using weak/custom cryptography",
           severity: "CRITICAL",
-          detection: (code) => {
-            return code.includes('md5(password)') ||
-                   code.includes('base64(password)') ||
-                   code.includes('custom_encrypt');
+          detection: (request) => {
+            // Build searchable string from request data
+            const searchStr = [
+              request?.url || '',
+              request?.requestBody || '',
+              typeof request?.headers === 'object' ? JSON.stringify(request.headers) : ''
+            ].join(' ');
+            return searchStr.includes('md5(password)') ||
+                   searchStr.includes('base64(password)') ||
+                   searchStr.includes('custom_encrypt');
           }
         },
         obscurity: {
           pattern: /X-Secret-Header|magic_token/,
           issue: "Relying on obscure headers/parameters",
           severity: "HIGH",
-          detection: (headers) => {
+          detection: (request) => {
+            const headers = request?.headers || {};
+            if (typeof headers !== 'object') return false;
             const suspicious = ['X-Secret', 'X-Magic', 'X-Special-Auth'];
-            return suspicious.some(h => headers[h]);
+            const headerKeys = Object.keys(headers).map(k => k.toLowerCase());
+            return suspicious.some(h => headerKeys.some(key => key.includes(h.toLowerCase())));
           }
         },
         sqlInAuth: {
           pattern: /SELECT.*FROM.*users.*WHERE.*password/i,
           issue: "Plaintext password comparison in SQL",
           severity: "CRITICAL",
-          detection: (query) => {
-            return query.includes('password = ') && !query.includes('hash');
+          detection: (request) => {
+            // Build searchable string from request data
+            const searchStr = [
+              request?.url || '',
+              request?.requestBody || '',
+              typeof request?.headers === 'object' ? JSON.stringify(request.headers) : ''
+            ].join(' ');
+            return searchStr.includes('password = ') && !searchStr.includes('hash');
           }
         }
       }

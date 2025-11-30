@@ -152,6 +152,7 @@ export class MessageRouter {
     const delegatedActions = [
       'enableDebugMode',
       'disableDebugMode',
+      'isDebugModeEnabled',
       'getDebugSession',
       'exportDebugSession',
       'clearDebugSession',
