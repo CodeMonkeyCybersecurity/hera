@@ -16,14 +16,22 @@ class ErrorCollector {
     // Dedupe cache for noisy repeats
     this._lastSeen = new Map(); // key -> timestamp
 
-    // OFF by default; can be toggled by message or storage
-    this.captureDebugLogs = false;
-
     // FIX: Debounce timer for persistence (prevent rate limit violations)
     this._persistTimer = null;
     this._PERSIST_DELAY = 1000; // 1 second
 
-    // Intercept console errors
+    // Periodic cleanup for dedupe cache
+    if (chrome?.alarms) {
+      // Register cleanup alarm (runs every 60 seconds)
+      chrome.alarms.create('error-collector-cleanup', { periodInMinutes: 1 });
+      chrome.alarms.onAlarm.addListener((alarm) => {
+        if (alarm?.name === 'error-collector-cleanup') {
+          this._cleanupLastSeen();
+        }
+      });
+    }
+
+    // Intercept global errors
     this.setupErrorHandlers();
   }
 
@@ -46,6 +54,18 @@ class ErrorCollector {
     if (now - last < DEDUPE_WINDOW_MS) return false; // suppress burst
     this._lastSeen.set(key, now);
     return true;
+  }
+
+  /**
+   * Remove expired dedupe entries
+   */
+  _cleanupLastSeen() {
+    const now = Date.now();
+    for (const [key, timestamp] of this._lastSeen.entries()) {
+      if (now - timestamp > DEDUPE_WINDOW_MS) {
+        this._lastSeen.delete(key);
+      }
+    }
   }
 
   /**
@@ -163,65 +183,6 @@ class ErrorCollector {
           this.logError(entry);
         }
       });
-    }
-
-    // Wrap console methods
-    this.wrapConsole();
-  }
-
-  /**
-   * Wrap console methods to capture errors
-   */
-  wrapConsole() {
-    const originalError = console.error;
-    const originalWarn = console.warn;
-    const originalLog = console.log;
-
-    console.error = (...args) => {
-      // BUGFIX: Don't log storage quota errors to prevent infinite loop
-      const message = args.map(a => String(a)).join(' ');
-      if (!message.includes('Storage rate limit') && !message.includes('QUOTA_BYTES')) {
-        const entry = {
-          type: 'CONSOLE_ERROR',
-          message: message,
-          args: args,
-          stack: new Error().stack,
-          timestamp: new Date().toISOString()
-        };
-        if (this._shouldLog(entry)) {
-          this.logError(entry);
-        }
-      }
-      originalError.apply(console, args);
-    };
-
-    console.warn = (...args) => {
-      const entry = {
-        type: 'CONSOLE_WARN',
-        message: args.map(a => String(a)).join(' '),
-        args: args,
-        timestamp: new Date().toISOString()
-      };
-      if (this._shouldLog(entry)) {
-        this.logWarning(entry);
-      }
-      originalWarn.apply(console, args);
-    };
-
-    // Optionally capture logs for debugging
-    if (this.captureDebugLogs) {
-      console.log = (...args) => {
-        const entry = {
-          type: 'CONSOLE_LOG',
-          message: args.map(a => String(a)).join(' '),
-          args: args,
-          timestamp: new Date().toISOString()
-        };
-        if (this._shouldLog(entry)) {
-          this.logInfo(entry);
-        }
-        originalLog.apply(console, args);
-      };
     }
   }
 

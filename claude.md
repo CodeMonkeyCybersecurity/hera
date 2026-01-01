@@ -25,6 +25,14 @@
 
 ---
 
+## Console Wrapping Removal
+
+- We no longer monkey-patch `console.*` methods; global `error`/`unhandledrejection` handlers remain the only capture points.
+- Rationale: console wrapping risks recursion, breaks DevTools expectations, mutates global browser state, and adds per-call overhead.
+- Security posture is improved by avoiding interception of developer tooling while still capturing unhandled errors/rejections.
+
+---
+
 ## Rule of Thumb: Priority Fixes
 
 **When adversarial analysis identifies issues, categorize and handle as:**
@@ -3288,4 +3296,3 @@ Hera is a **monitoring tool**, not an **authentication library**. Signature veri
 **Date:** 2025-10-30
 **Verdict:** ✅ STRONG FOUNDATION, 5 CRITICAL GAPS TO ADDRESS
 **Recommendation:** Prioritize P0 (DPoP integration) + P1 (PKCE severity, rotation UI, debugger scoping)
-
