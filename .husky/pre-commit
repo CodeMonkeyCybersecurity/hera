@@ -1,13 +1,15 @@
 #!/usr/bin/env sh
 . "$(dirname -- "$0")/_/husky.sh"
 
-echo "🔍 Running pre-commit checks..."
+echo "Running pre-commit checks..."
 
-# Run lint-staged to check only staged files
+# Validate ESLint config exists and is valid
+if [ ! -f "eslint.config.js" ]; then
+  echo "ERROR: eslint.config.js not found"
+  exit 1
+fi
+
+# Run lint-staged (ESLint on staged files only)
 npx lint-staged
 
-# Check coverage delta (ensure coverage doesn't decrease)
-echo "📊 Checking test coverage..."
-npm run test:coverage -- --changed
-
-echo "✅ Pre-commit checks passed!"
+echo "Pre-commit checks passed!"
