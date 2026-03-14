@@ -302,8 +302,8 @@ export class OIDCValidator {
           evidence: {
             acr: payload.acr,
             interpretation: acrValue === 0 ? 'No authentication' :
-                          acrValue === 1 ? 'Password only' :
-                          'MFA',
+              acrValue === 1 ? 'Password only' :
+                'MFA',
             risk: 'User authenticated with weaker method than required'
           }
         });
@@ -321,7 +321,7 @@ export class OIDCValidator {
   }
 
   _isOIDCTokenResponse(responseData) {
-    if (!responseData || !responseData.body) return false;
+    if (!responseData || !responseData.body) {return false;}
 
     try {
       const body = typeof responseData.body === 'string' ?
@@ -392,11 +392,11 @@ export class OIDCValidator {
       const body = typeof responseData.body === 'string' ?
         JSON.parse(responseData.body) : responseData.body;
 
-      if (!body.id_token) return issues;
+      if (!body.id_token) {return issues;}
 
       // Parse ID token (it's a JWT)
       const idToken = this._parseJWT(body.id_token);
-      if (!idToken) return issues;
+      if (!idToken) {return issues;}
 
       // Build context for validation
       const context = {
@@ -489,7 +489,7 @@ export class OIDCValidator {
   _parseJWT(token) {
     try {
       const parts = token.split('.');
-      if (parts.length !== 3) return null;
+      if (parts.length !== 3) {return null;}
 
       const header = JSON.parse(atob(parts[0].replace(/-/g, '+').replace(/_/g, '/')));
       const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
@@ -507,7 +507,7 @@ export class OIDCValidator {
           JSON.parse(requestData.body) : requestData.body;
         return body.client_id;
       }
-    } catch {}
+    } catch { /* invalid URL or body format — return null */ }
     return null;
   }
 
@@ -515,7 +515,7 @@ export class OIDCValidator {
     try {
       const url = new URL(requestData.url);
       return url.searchParams.get('nonce');
-    } catch {}
+    } catch { /* invalid URL format — return null */ }
     return null;
   }
 
@@ -541,8 +541,8 @@ export class OIDCValidator {
       // Determine hash algorithm from JWT algorithm
       // RS256/HS256 -> SHA-256, RS384/HS384 -> SHA-384, RS512/HS512 -> SHA-512
       const hashAlg = algorithm.endsWith('256') ? 'SHA-256' :
-                      algorithm.endsWith('384') ? 'SHA-384' :
-                      algorithm.endsWith('512') ? 'SHA-512' : 'SHA-256';
+        algorithm.endsWith('384') ? 'SHA-384' :
+          algorithm.endsWith('512') ? 'SHA-512' : 'SHA-256';
 
       // Hash the access token
       const encoder = new TextEncoder();
@@ -608,8 +608,8 @@ export class OIDCValidator {
     try {
       // Same algorithm as at_hash
       const hashAlg = algorithm.endsWith('256') ? 'SHA-256' :
-                      algorithm.endsWith('384') ? 'SHA-384' :
-                      algorithm.endsWith('512') ? 'SHA-512' : 'SHA-256';
+        algorithm.endsWith('384') ? 'SHA-384' :
+          algorithm.endsWith('512') ? 'SHA-512' : 'SHA-256';
 
       // Hash the authorization code
       const encoder = new TextEncoder();

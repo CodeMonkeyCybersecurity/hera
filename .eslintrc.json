@@ -89,6 +89,12 @@
         "mocha": true,
         "jest": true
       }
+    },
+    {
+      "files": ["scripts/**/*.js"],
+      "env": {
+        "node": true
+      }
     }
   ]
 }

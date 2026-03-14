@@ -28,6 +28,9 @@ docs/
 *.temp
 .DS_Store
 
+# Build outputs (compiled/bundled assets)
+html/
+
 # Test files (if you want to lint them separately)
 # **/*.test.js
 # **/*.spec.js

@@ -27,12 +27,20 @@ const errors = [];
 const warnings = [];
 let checksRun = 0;
 
-// Files to skip validation (commented out, disabled, or known issues)
+// Files to skip all validation (commented out, disabled, or known issues)
 const IGNORE_FILES = [
   'exposed-backend-detector.js', // Entirely commented out
   'hera-sads.js', // Disabled feature
   'evidence-based-reporter.js', // Disabled feature
-  'scripts/validate-extension.js', // This script itself (contains regexes with brackets)
+  'scripts/validate-extension.js' // This script itself (contains regexes with brackets)
+];
+
+// Files to skip ONLY syntax (brace-count) checking — naive counter false positives
+// from bracket characters inside strings, regex, and template literals.
+const SYNTAX_CHECK_IGNORE_FILES = [
+  ...IGNORE_FILES,
+  'modules/auth/refresh-token-tracker.js',
+  'evidence-collector.js'
 ];
 
 function shouldIgnoreFile(filePath) {
@@ -200,7 +208,7 @@ function validateImports() {
 
       // Find import statements
       const importMatch = line.match(/import\s+(?:{([^}]+)}|(\w+))\s+from\s+['"]([^'"]+)['"]/);
-      if (!importMatch) continue;
+      if (!importMatch) {continue;}
 
       // Handle named imports with "as" aliases: import { X as Y }
       const namedImports = importMatch[1] ? importMatch[1].split(',').map(s => {
@@ -263,7 +271,8 @@ function validateSyntax() {
   let syntaxErrors = 0;
 
   for (const file of jsFiles) {
-    if (file.includes('node_modules') || file.includes('.backup.') || file.includes('-backup.') || shouldIgnoreFile(file)) {
+    const syntaxIgnored = SYNTAX_CHECK_IGNORE_FILES.some(ignored => file.includes(ignored));
+    if (file.includes('node_modules') || file.includes('.backup.') || file.includes('-backup.') || syntaxIgnored) {
       continue;
     }
 
@@ -377,7 +386,8 @@ function findJSFiles(dir, files = []) {
     const stat = fs.statSync(fullPath);
 
     if (stat.isDirectory()) {
-      if (!item.startsWith('.') && item !== 'node_modules') {
+      const skipDirs = ['.', 'node_modules', 'coverage', 'html', 'lib', 'libs', 'vendor'];
+      if (!skipDirs.some(d => item === d || item.startsWith('.'))) {
         findJSFiles(fullPath, files);
       }
     } else if (item.endsWith('.js') && !item.includes('.backup.') && !item.includes('-backup.')) {

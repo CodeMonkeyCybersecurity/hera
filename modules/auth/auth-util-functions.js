@@ -73,7 +73,7 @@ class AuthUtilFunctions {
    * @returns {number} Shannon entropy value
    */
   calculateEntropy(str) {
-    if (!str || str.length === 0) return 0;
+    if (!str || str.length === 0) {return 0;}
 
     const freq = {};
     for (const char of str) {
@@ -248,8 +248,8 @@ class AuthUtilFunctions {
 
       // Check for credentials in URL path (rare but possible)
       const pathCredentialPatterns = [
-        /\/password\/[^\/]+/i,
-        /\/secret\/[^\/]+/i,
+        /\/password\/[^/]+/i,
+        /\/secret\/[^/]+/i,
         /\/token\/[a-zA-Z0-9]{20,}/i // Long tokens in path
       ];
 

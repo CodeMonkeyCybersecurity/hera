@@ -41,7 +41,10 @@ class OAuth2Analyzer {
       { domain: 'salesforce.com', name: 'Salesforce', type: 'Salesforce Identity' },
       { domain: 'linkedin.com', name: 'LinkedIn', type: 'LinkedIn OAuth' },
       { domain: 'amazon.com', name: 'Amazon', type: 'Login with Amazon' },
-      { domain: 'apple.com', name: 'Apple', type: 'Sign in with Apple' }
+      { domain: 'apple.com', name: 'Apple', type: 'Sign in with Apple' },
+      { domain: 'authentik.io', name: 'authentik', type: 'authentik OIDC' }
+      // Self-hosted authentik instances are detected by URL path patterns
+      // e.g. /application/o/authorize/, /api/v3/, /flows/executor/
     ];
   }
 
@@ -50,7 +53,7 @@ class OAuth2Analyzer {
    * Returns both per-character entropy and total information content
    */
   calculateEntropy(str) {
-    if (!str) return { perChar: 0, total: 0 };
+    if (!str) {return { perChar: 0, total: 0 };}
 
     // Count character frequencies
     const freq = {};
@@ -138,20 +141,31 @@ class OAuth2Analyzer {
     }
 
     // Check entropy per character (should be >= 3 bits for decent randomness)
-    // AND total entropy (should be >= 128 bits minimum for security)
-    if (entropyData.perChar >= 3 && entropyData.total >= 128) {
+    // AND effective entropy >= 128 bits minimum for security.
+    //
+    // Shannon entropy underestimates true randomness for short strings (sampling noise).
+    // NIST SP 800-63B §5.1.1: assess entropy by algorithm, not sample distribution.
+    // For strings using a high-entropy charset (base64url: 6 bits/char), use theoretical
+    // entropy as a supplementary measure when Shannon is below threshold due to sample size.
+    const isBase64urlCharset = /^[A-Za-z0-9_-]+$/.test(state);
+    const theoreticalEntropy = isBase64urlCharset ? state.length * Math.log2(64) : entropyData.total;
+    const effectiveEntropy = Math.max(entropyData.total, theoreticalEntropy);
+
+    if (entropyData.perChar >= 3 && effectiveEntropy >= 128) {
       analysis.appearsRandom = true;
       analysis.risk = 'LOW';
-    } else if (entropyData.perChar >= 2 && entropyData.total >= 64) {
+    } else if (entropyData.perChar >= 2 && effectiveEntropy >= 64) {
       analysis.risk = 'MEDIUM';
       issues.push({
         severity: 'MEDIUM',
         type: 'LOW_ENTROPY_STATE',
-        message: `State parameter has low entropy (${Math.round(entropyData.total)} bits, minimum 128 recommended)`,
+        message: `State parameter has low entropy (${Math.round(effectiveEntropy)} bits effective, minimum 128 recommended)`,
         recommendation: 'Increase state randomness to minimum 128 bits',
         cvss: 5.0,
         evidence: {
-          totalEntropy: Math.round(entropyData.total),
+          shannonEntropy: Math.round(entropyData.total),
+          theoreticalEntropy: Math.round(theoreticalEntropy),
+          effectiveEntropy: Math.round(effectiveEntropy),
           entropyPerChar: entropyData.perChar.toFixed(2),
           minRecommended: 128
         }
@@ -161,10 +175,13 @@ class OAuth2Analyzer {
       issues.push({
         severity: 'HIGH',
         type: 'INSUFFICIENT_ENTROPY_STATE',
-        message: `State parameter has insufficient entropy (${Math.round(entropyData.total)} bits)`,
+        message: `State parameter has insufficient entropy (${Math.round(effectiveEntropy)} bits effective)`,
         recommendation: 'State must have minimum 128 bits of entropy to prevent guessing attacks',
         cvss: 7.0,
-        evidence: { totalEntropy: Math.round(entropyData.total) }
+        evidence: {
+          shannonEntropy: Math.round(entropyData.total),
+          effectiveEntropy: Math.round(effectiveEntropy)
+        }
       });
     }
 

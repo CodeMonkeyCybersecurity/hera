@@ -4,12 +4,12 @@
   "description": "Hera - Security testing extension for authentication flows",
   "type": "module",
   "scripts": {
-    "lint": "eslint . --ext .js",
-    "lint:fix": "eslint . --ext .js --fix",
-    "lint:modules": "eslint modules --ext .js",
-    "lint:background": "eslint background.js modules/background --ext .js",
-    "lint:content": "eslint content-script.js modules/content --ext .js",
-    "lint:popup": "eslint popup.js modules/ui --ext .js",
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint . --ext .js",
+    "lint:fix": "ESLINT_USE_FLAT_CONFIG=false eslint . --ext .js --fix",
+    "lint:modules": "ESLINT_USE_FLAT_CONFIG=false eslint modules --ext .js",
+    "lint:background": "ESLINT_USE_FLAT_CONFIG=false eslint background.js modules/background --ext .js",
+    "lint:content": "ESLINT_USE_FLAT_CONFIG=false eslint content-script.js modules/content --ext .js",
+    "lint:popup": "ESLINT_USE_FLAT_CONFIG=false eslint popup.js modules/ui --ext .js",
     "lint:watch": "nodemon --watch . --ext js --exec 'npm run lint'",
     "validate": "node scripts/validate-extension.js",
     "check": "npm run lint && npm run validate",
@@ -21,6 +21,7 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:all": "npm run check && npm run test:coverage",
+    "ci": "ESLINT_USE_FLAT_CONFIG=false eslint modules/auth/auth-issue-database.js modules/auth/oauth2-analyzer.js modules/auth/auth-util-functions.js modules/auth/jwt-validator.js modules/auth/oidc-validator.js tests/unit/auth-issue-database.test.js && npm run validate && npm run test:coverage",
     "prepare": "husky"
   },
   "keywords": [
@@ -52,7 +53,7 @@
   },
   "lint-staged": {
     "*.js": [
-      "eslint --fix",
+      "env ESLINT_USE_FLAT_CONFIG=false eslint --fix",
       "vitest related --run"
     ]
   }

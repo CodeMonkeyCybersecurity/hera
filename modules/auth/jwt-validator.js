@@ -154,7 +154,7 @@ class JWTValidator {
 
     // CRITICAL: alg:none vulnerability (check all bypass variants)
     const algLower = alg.toLowerCase().trim();
-    const algNormalized = alg.replace(/\u0000/g, '').trim(); // Remove null bytes
+    const algNormalized = alg.replace(/\u0000/g, '').trim(); // eslint-disable-line no-control-regex -- Remove null bytes (JWT alg:none bypass)
 
     if (algLower === 'none' || algNormalized.toLowerCase() === 'none' || alg === '') {
       return {
@@ -168,8 +168,8 @@ class JWTValidator {
         evidence: {
           algorithm: alg,
           bypass: alg !== algLower ? 'Case variation bypass attempt' :
-                  alg !== algNormalized ? 'Null byte injection attempt' :
-                  alg === '' ? 'Empty algorithm' : 'Standard alg:none',
+            alg !== algNormalized ? 'Null byte injection attempt' :
+              alg === '' ? 'Empty algorithm' : 'Standard alg:none',
           risk: 'Complete authentication bypass'
         }
       };
@@ -257,7 +257,7 @@ class JWTValidator {
    * Check if algorithm is asymmetric
    */
   _isAsymmetricAlgorithm(alg) {
-    if (!alg) return false;
+    if (!alg) {return false;}
     const upper = alg.toUpperCase();
     return upper.startsWith('RS') || upper.startsWith('ES') || upper.startsWith('PS');
   }
@@ -426,13 +426,13 @@ class JWTValidator {
    */
   _looksLikePII(value) {
     // Email pattern
-    if (/@.*\..+/.test(value)) return true;
+    if (/@.*\..+/.test(value)) {return true;}
 
     // Phone number pattern (simplified)
-    if (/\d{3}[-.]?\d{3}[-.]?\d{4}/.test(value)) return true;
+    if (/\d{3}[-.]?\d{3}[-.]?\d{4}/.test(value)) {return true;}
 
     // SSN pattern
-    if (/\d{3}-\d{2}-\d{4}/.test(value)) return true;
+    if (/\d{3}-\d{2}-\d{4}/.test(value)) {return true;}
 
     return false;
   }
@@ -441,9 +441,9 @@ class JWTValidator {
    * Format duration in human-readable form
    */
   _formatDuration(seconds) {
-    if (seconds < 60) return `${seconds}s`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+    if (seconds < 60) {return `${seconds}s`;}
+    if (seconds < 3600) {return `${Math.floor(seconds / 60)}m`;}
+    if (seconds < 86400) {return `${Math.floor(seconds / 3600)}h`;}
     return `${Math.floor(seconds / 86400)}d`;
   }
 
@@ -531,7 +531,7 @@ class JWTValidator {
    * Check if string looks like a JWT
    */
   _looksLikeJWT(str) {
-    if (typeof str !== 'string') return false;
+    if (typeof str !== 'string') {return false;}
     const parts = str.split('.');
     return parts.length === 3 && parts[0].length > 10 && parts[1].length > 10;
   }
