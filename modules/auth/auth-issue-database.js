@@ -7,6 +7,10 @@ import { OAuth2Analyzer } from './oauth2-analyzer.js';
 class AuthIssueDatabase extends AuthUtilFunctions {
   constructor() {
     super();
+    // Singleton: avoid instantiating OAuth2Analyzer on every detection call.
+    // Arrow functions in initializeIssueDatabase() close over 'this', so
+    // this._analyzer is accessible inside severity/detection closures.
+    this._analyzer = new OAuth2Analyzer();
     this.database = this.initializeIssueDatabase();
   }
 
@@ -49,8 +53,8 @@ class AuthIssueDatabase extends AuthUtilFunctions {
           severity: (req, detector) => {
             const params = detector.parseParams(req.url);
             const state = params?.state;
-            const analyzer = new OAuth2Analyzer();
-            const quality = analyzer.analyzeStateQuality(state);
+            // Use shared instance — no per-call allocation
+            const quality = this._analyzer.analyzeStateQuality(state);
 
             if (quality.totalEntropy < 32 || quality.entropyPerChar < 1) {return 'CRITICAL';}
             if (quality.totalEntropy < 64 || quality.entropyPerChar < 2) {return 'HIGH';}
@@ -68,8 +72,8 @@ class AuthIssueDatabase extends AuthUtilFunctions {
               return false;
             }
 
-            const analyzer = new OAuth2Analyzer();
-            const quality = analyzer.analyzeStateQuality(state);
+            // Use shared instance — no per-call allocation
+            const quality = this._analyzer.analyzeStateQuality(state);
 
             // Flag if entropy is too low AND no PKCE
             return quality.totalEntropy < 64 && !params?.code_challenge;

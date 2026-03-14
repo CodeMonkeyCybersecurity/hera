@@ -137,25 +137,30 @@ class OAuth2Analyzer {
         cvss: 7.0,
         evidence: { length: state.length, minRecommended: 16 }
       });
-      analysis.risk = 'HIGH';
+      // Guard: don't downgrade CRITICAL (e.g. set by predictable value check above)
+      if (analysis.risk !== 'CRITICAL') { analysis.risk = 'HIGH'; }
     }
 
     // Check entropy per character (should be >= 3 bits for decent randomness)
     // AND effective entropy >= 128 bits minimum for security.
     //
     // Shannon entropy underestimates true randomness for short strings (sampling noise).
-    // NIST SP 800-63B §5.1.1: assess entropy by algorithm, not sample distribution.
-    // For strings using a high-entropy charset (base64url: 6 bits/char), use theoretical
-    // entropy as a supplementary measure when Shannon is below threshold due to sample size.
+    // Principle: assess entropy by alphabet size × length when the generation algorithm
+    // is known to use a high-entropy charset. For base64url (64 symbols = 6 bits/symbol),
+    // a 22-char random state has theoretical entropy = 22×6 = 132 bits, even if the
+    // observed Shannon entropy is lower due to collisions in a small sample.
+    // Ref: RFC 9700 §2.1 (state must be unguessable); NIST SP 800-90A (CSPRNG output).
     const isBase64urlCharset = /^[A-Za-z0-9_-]+$/.test(state);
     const theoreticalEntropy = isBase64urlCharset ? state.length * Math.log2(64) : entropyData.total;
     const effectiveEntropy = Math.max(entropyData.total, theoreticalEntropy);
 
     if (entropyData.perChar >= 3 && effectiveEntropy >= 128) {
       analysis.appearsRandom = true;
-      analysis.risk = 'LOW';
+      // Guard: don't downgrade CRITICAL (e.g. set by predictable value check above)
+      if (analysis.risk !== 'CRITICAL') { analysis.risk = 'LOW'; }
     } else if (entropyData.perChar >= 2 && effectiveEntropy >= 64) {
-      analysis.risk = 'MEDIUM';
+      // Guard: don't downgrade CRITICAL
+      if (analysis.risk !== 'CRITICAL') { analysis.risk = 'MEDIUM'; }
       issues.push({
         severity: 'MEDIUM',
         type: 'LOW_ENTROPY_STATE',
@@ -171,7 +176,8 @@ class OAuth2Analyzer {
         }
       });
     } else {
-      analysis.risk = 'HIGH';
+      // Guard: don't downgrade CRITICAL
+      if (analysis.risk !== 'CRITICAL') { analysis.risk = 'HIGH'; }
       issues.push({
         severity: 'HIGH',
         type: 'INSUFFICIENT_ENTROPY_STATE',

@@ -30,19 +30,34 @@ export default defineConfig({
       ],
       // Coverage thresholds: ratchet strategy — thresholds = actual coverage to prevent regression.
       // Raise these as new tests are added (see follow-up issues for untested modules).
-      // Global actual: ~9% (most modules untested — tracked as P2 follow-up)
-      // Auth modules actual: ~31% (raised to match after auth-issue-database tests added)
-      // auth-issue-database.js actual: 99% stmts / 96% branch / 100% funcs (security-critical)
+      // Global actual: ~10% (most modules untested — tracked as P2 follow-up)
+      // Auth modules actual: ~31% aggregate (17 of 25 files still at 0% — tracked as P2)
+      // Per-file actuals after fix/1 (2026-03-14):
+      //   auth-issue-database.js: 99.18% stmts / 97.59% branches / 100% funcs / 100% lines
+      //   auth-util-functions.js: 97.08% stmts / 89% branches / 100% funcs / 97% lines
+      //   oauth2-analyzer.js:     98.61% stmts / 96.52% branches / 100% funcs / 98.52% lines
       thresholds: {
         lines: 8,
         functions: 8,
         branches: 8,
         statements: 8,
         'modules/auth/auth-issue-database.js': {
-          lines: 95,
-          functions: 95,
-          branches: 90,
-          statements: 95
+          lines: 99,
+          functions: 100,
+          branches: 97,
+          statements: 99
+        },
+        'modules/auth/auth-util-functions.js': {
+          lines: 96,
+          functions: 100,
+          branches: 88,
+          statements: 96
+        },
+        'modules/auth/oauth2-analyzer.js': {
+          lines: 98,
+          functions: 100,
+          branches: 96,
+          statements: 98
         },
         'modules/auth/**/*.js': {
           lines: 30,
