@@ -450,7 +450,7 @@ class JWTValidator {
   /**
    * Generate recommendation based on risk score
    */
-  _generateRecommendation(riskScore, issues) {
+  _generateRecommendation(riskScore, _issues) {
     if (riskScore >= 70) {
       return {
         action: 'REJECT',
@@ -540,7 +540,7 @@ class JWTValidator {
    * Analyze request data for JWTs and return findings
    * Called by WebRequestListeners.registerCompleted()
    */
-  analyzeRequest(requestData, url) {
+  analyzeRequest(requestData, _url) {
     const findings = [];
 
     // Extract headers as object

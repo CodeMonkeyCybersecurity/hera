@@ -53,7 +53,7 @@ class AuthUtilFunctions {
    * @param {string} secret - Secret key
    * @returns {boolean} Verification result
    */
-  verifyHS256(jwt, secret) {
+  verifyHS256(_jwt, _secret) {
     // Simplified verification - in real implementation would use crypto
     return false;
   }
@@ -181,7 +181,6 @@ class AuthUtilFunctions {
     try {
       const urlObj = new URL(url);
       const params = new URLSearchParams(urlObj.search);
-      const fullUrl = url.toLowerCase();
 
       // Legitimate OAuth2 security parameters - these should NOT be flagged
       const oauthSecurityParams = ['state', 'nonce', 'code_challenge', 'code_verifier'];
@@ -196,7 +195,6 @@ class AuthUtilFunctions {
       // Check for actual credential exposure in query parameters
       for (const [key, value] of params) {
         const lowerKey = key.toLowerCase();
-        const lowerValue = value.toLowerCase();
 
         // Skip OAuth2 security parameters
         if (oauthSecurityParams.includes(lowerKey)) {

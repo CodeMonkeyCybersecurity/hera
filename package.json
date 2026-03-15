@@ -21,7 +21,10 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:all": "npm run check && npm run test:coverage",
-    "ci": "ESLINT_USE_FLAT_CONFIG=false eslint modules/auth/auth-issue-database.js modules/auth/oauth2-analyzer.js modules/auth/auth-util-functions.js modules/auth/jwt-validator.js modules/auth/oidc-validator.js tests/unit/auth-issue-database.test.js && npm run validate && npm run test:coverage",
+    "test:summary": "vitest run --reporter=dot",
+    "lint:critical": "ESLINT_USE_FLAT_CONFIG=false eslint modules/auth/auth-issue-database.js modules/auth/oauth2-analyzer.js modules/auth/auth-util-functions.js modules/auth/jwt-validator.js modules/auth/oidc-validator.js",
+    "lint:audit": "ESLINT_USE_FLAT_CONFIG=false eslint . --ext .js",
+    "ci": "npm run lint:critical && npm run validate && npm run test:coverage",
     "prepare": "husky"
   },
   "keywords": [

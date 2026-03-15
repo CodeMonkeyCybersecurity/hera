@@ -456,7 +456,7 @@ export class OIDCValidator {
     return issues;
   }
 
-  _validateUserInfoEndpoint(url, requestData) {
+  _validateUserInfoEndpoint(url, _requestData) {
     const issues = [];
 
     // P0-14: UserInfo endpoint should be HTTPS

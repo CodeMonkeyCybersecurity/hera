@@ -5,3 +5,6 @@ node_modules/
 coverage/
 html/
 .vitest/
+
+# Claude Code local settings (machine-specific permissions — not shared)
+.claude/settings.local.json
