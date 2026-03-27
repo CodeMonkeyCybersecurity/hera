@@ -80,8 +80,27 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
+    - name: Validate ESLint config exists
+      run: |
+        if [ ! -f "eslint.config.js" ]; then
+          echo "ERROR: eslint.config.js not found"
+          echo "See docs/adr/ADR-001-eslint-config-format.md for rationale"
+          exit 1
+        fi
+        # Fail if legacy config exists (should have been deleted)
+        if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.yaml" ]; then
+          echo "ERROR: Legacy ESLint config found - delete it"
+          exit 1
+        fi
+
+    - name: Validate ESLint config loads
+      run: npx eslint --print-config background.js > /dev/null
+
     - name: Run ESLint
       run: npm run lint
+
+    - name: Run ESLint config tests
+      run: npm run test -- tests/config/eslint-config.test.js
 
     - name: Check for security vulnerabilities
       run: npm audit --audit-level=moderate

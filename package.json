@@ -4,12 +4,12 @@
   "description": "Hera - Security testing extension for authentication flows",
   "type": "module",
   "scripts": {
-    "lint": "eslint . --ext .js",
-    "lint:fix": "eslint . --ext .js --fix",
-    "lint:modules": "eslint modules --ext .js",
-    "lint:background": "eslint background.js modules/background --ext .js",
-    "lint:content": "eslint content-script.js modules/content --ext .js",
-    "lint:popup": "eslint popup.js modules/ui --ext .js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "lint:modules": "eslint modules",
+    "lint:background": "eslint background.js modules/background",
+    "lint:content": "eslint content-script.js modules/content",
+    "lint:popup": "eslint popup.js modules/ui",
     "lint:watch": "nodemon --watch . --ext js --exec 'npm run lint'",
     "validate": "node scripts/validate-extension.js",
     "check": "npm run lint && npm run validate",
@@ -37,9 +37,11 @@
     "ae-cvss-calculator": "^1.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@vitest/coverage-v8": "^4.0.7",
     "@vitest/ui": "^4.0.7",
     "eslint": "^8.57.0",
+    "globals": "^16.5.0",
     "happy-dom": "^20.0.10",
     "husky": "^9.1.7",
     "jsdom": "^27.1.0",
@@ -52,8 +54,7 @@
   },
   "lint-staged": {
     "*.js": [
-      "eslint --fix",
-      "vitest related --run"
+      "eslint --fix"
     ]
   }
 }
